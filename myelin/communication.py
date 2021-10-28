@@ -7,10 +7,12 @@ import os
 from mpi4py import MPI
 import torch
 
-class communication_handle():
+
+class communication_handle:
     """
     Communnication handle for point-to-point(MPI) and collective communication(NCCL) of GPU tensors.
     """
+
     def __init__(self, G_inter: int, G_data: int, gpus_per_node: int = None):
         """ Constructor for the communication handle
 
@@ -23,36 +25,48 @@ class communication_handle():
 
         self.world_rank = MPI.COMM_WORLD.Get_rank()
         self.world_size = MPI.COMM_WORLD.Get_size()
-        assert G_inter*G_data == self.world_size, "The product of G_inter and G_data should be equal to the number of GPUs"
+        assert (
+            G_inter * G_data == self.world_size
+        ), "The product of G_inter and G_data should be equal to the number of GPUs"
         self.G_inter = G_inter
         self.G_data = G_data
-        
-        #infer gpus per node if not provided
-        self.gpus_per_node = gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
+
+        # infer gpus per node if not provided
+        self.gpus_per_node = (
+            gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
+        )
         self.local_rank = self.world_rank % self.gpus_per_node
         torch.cuda.set_device(self.local_rank)
         self.data_parallel_rank = self.world_rank // G_inter
-        self.inter_layer_parallel_rank = self.world_rank % G_inter 
+        self.inter_layer_parallel_rank = self.world_rank % G_inter
 
-        #create communicator for point-to-point(MPI) communication 
-        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(self.data_parallel_rank) 
+        # create communicator for point-to-point(MPI) communication
+        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(self.data_parallel_rank)
 
-        #create communicator for collective (NCCL) communication
+        # create communicator for collective (NCCL) communication
         if not torch.distributed.is_initialized():
-            init_method = 'tcp://'
-            master_ip = os.getenv('MASTER_ADDR', 'localhost')
-            master_port = os.getenv('MASTER_PORT', '6000')
-            init_method += master_ip + ':' + master_port
+            init_method = "tcp://"
+            master_ip = os.getenv("MASTER_ADDR", "localhost")
+            master_port = os.getenv("MASTER_PORT", "6000")
+            init_method += master_ip + ":" + master_port
             torch.distributed.init_process_group(
-                backend='nccl',
-                world_size=self.world_size, rank=self.world_rank,
-                init_method=init_method)
+                backend="nccl",
+                world_size=self.world_size,
+                rank=self.world_rank,
+                init_method=init_method,
+            )
 
-        for i in range(self.G_inter): #all ranks have to form all data parallel communicators and not just their own
-            ranks_in_ith_data_parallel_group = [j*self.G_inter+i for j in range(self.G_data)]
-            ith_data_parallel_group = torch.distributed.new_group(ranks=ranks_in_ith_data_parallel_group, backend='nccl')
+        for i in range(
+            self.G_inter
+        ):  # all ranks have to form all data parallel communicators and not just their own
+            ranks_in_ith_data_parallel_group = [
+                j * self.G_inter + i for j in range(self.G_data)
+            ]
+            ith_data_parallel_group = torch.distributed.new_group(
+                ranks=ranks_in_ith_data_parallel_group, backend="nccl"
+            )
             if self.inter_layer_parallel_rank == i:
-                self.coll_nccl_comm = ith_data_parallel_group 
+                self.coll_nccl_comm = ith_data_parallel_group
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its unified virtual address
@@ -61,10 +75,16 @@ class communication_handle():
             tensor (torch.Tensor): the Pytorch tensor
             
         """
-        return [MPI.memory.fromaddress(tensor.data_ptr(), tensor.element_size() * tensor.nelement()), MPI.FLOAT]  
+        return [
+            MPI.memory.fromaddress(
+                tensor.data_ptr(), tensor.element_size() * tensor.nelement()
+            ),
+            MPI.FLOAT,
+        ]
 
-
-    def send(self, tensor: torch.Tensor, recv_rank: int, tag: int, async_op: bool = True):
+    def send(
+        self, tensor: torch.Tensor, recv_rank: int, tag: int, async_op: bool = True
+    ):
         """Send a PyTorch tensor to a particular rank using MPI
 
         Arguments:
@@ -78,12 +98,20 @@ class communication_handle():
         """
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         if async_op:
-            mpi_future_object = self.p2p_mpi_comm.Isend(mpi4py_compatible_array, recv_rank, tag)
+            mpi_future_object = self.p2p_mpi_comm.Isend(
+                mpi4py_compatible_array, recv_rank, tag
+            )
             return mpi_future_object
         else:
             self.p2p_mpi_comm.Send(mpi4py_compatible_array, recv_rank, tag)
 
-    def recv(self, tensor: torch.Tensor, send_rank: int, tag: int = MPI.ANY_TAG, async_op: bool = True):
+    def recv(
+        self,
+        tensor: torch.Tensor,
+        send_rank: int,
+        tag: int = MPI.ANY_TAG,
+        async_op: bool = True,
+    ):
         """Receive a PyTorch tensor from a particular rank using MPI
 
         Arguments:
@@ -97,7 +125,9 @@ class communication_handle():
         """
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         if async_op:
-            mpi_future_object = self.p2p_mpi_comm.Irecv(mpi4py_compatible_array, send_rank, tag)
+            mpi_future_object = self.p2p_mpi_comm.Irecv(
+                mpi4py_compatible_array, send_rank, tag
+            )
             return mpi_future_object
         else:
             self.p2p_mpi_comm.Recv(mpi4py_compatible_array, send_rank, tag)
@@ -109,5 +139,6 @@ class communication_handle():
             tensor (torch.Tensor): the PyTorch tensor to be all-reduced
             async_op (bool, optional): use asynchronous all-reduce
         """
-        return torch.distributed.all_reduce(tensor, group=self.coll_nccl_comm, async_op=async_op)
-
+        return torch.distributed.all_reduce(
+            tensor, group=self.coll_nccl_comm, async_op=async_op
+        )
