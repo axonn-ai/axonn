@@ -51,7 +51,7 @@ class communication_handle():
         for i in range(self.G_inter): #all ranks have to form all data parallel communicators and not just their own
             ranks_in_ith_data_parallel_group = [j*self.G_inter+i for j in range(self.G_data)]
             ith_data_parallel_group = torch.distributed.new_group(ranks=ranks_in_ith_data_parallel_group, backend='nccl')
-            if self.data_parallel_rank == i:
+            if self.inter_layer_parallel_rank == i:
                 self.coll_nccl_comm = ith_data_parallel_group 
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
@@ -64,8 +64,8 @@ class communication_handle():
         return [MPI.memory.fromaddress(tensor.data_ptr(), tensor.element_size() * tensor.nelement()), MPI.FLOAT]  
 
 
-    def _send(self, tensor: torch.Tensor, recv_rank: int, tag: int, async_op: bool = True):
-        """Send a PyTorch tensor to a particular rank
+    def send(self, tensor: torch.Tensor, recv_rank: int, tag: int, async_op: bool = True):
+        """Send a PyTorch tensor to a particular rank using MPI
 
         Arguments:
             tensor (torch.Tensor): the PyTorch tensor to be sent
@@ -83,8 +83,8 @@ class communication_handle():
         else:
             self.p2p_mpi_comm.Send(mpi4py_compatible_array, recv_rank, tag)
 
-    def _recv(self, tensor: torch.Tensor, send_rank: int, tag: int = MPI.ANY_TAG, async_op: bool = True):
-        """Receive a PyTorch tensor from a particular rank
+    def recv(self, tensor: torch.Tensor, send_rank: int, tag: int = MPI.ANY_TAG, async_op: bool = True):
+        """Receive a PyTorch tensor from a particular rank using MPI
 
         Arguments:
             tensor (torch.Tensor): the PyTorch tensor that will receive the data
@@ -102,22 +102,12 @@ class communication_handle():
         else:
             self.p2p_mpi_comm.Recv(mpi4py_compatible_array, send_rank, tag)
 
+    def allreduce(self, tensor, async_op: bool = True):
+        """Allreduce a PyTorch tensor using NCCL, GPUs in the self.coll_nccl_comm process group participate in the all-reduce
 
-if __name__ == "__main__":
-    handle = communication_handle(2,1,2)
-    if handle.world_rank == 0:
-        send_tensor = torch.ones(10000, device='cuda')
-        torch.cuda.synchronize()
-        f = handle._send(send_tensor, 1, 0)
-        f.Wait()
-    else:
-        recv_tensor = torch.empty(10000, device='cuda')
-        torch.cuda.synchronize()
-        f = handle._recv(recv_tensor, 0)
-        f.Wait()
-        assert recv_tensor.sum() == recv_tensor.numel(), "message was not received properly"
-        print("test passed!")
+        Arguments:
+            tensor (torch.Tensor): the PyTorch tensor to be all-reduced
+            async_op (bool, optional): use asynchronous all-reduce
+        """
+        return torch.distributed.all_reduce(tensor, group=self.coll_nccl_comm, async_op=async_op)
 
-
-        
-    
