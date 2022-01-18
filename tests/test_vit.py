@@ -6,12 +6,12 @@ import torch
 
 
 def test_vit_mnist():
-    bs = 64
-    mbs = 8
+    bs = 32*3*8
+    mbs = 32
     epochs=10
     N, D, H = 6, 128, 16
 
-    ax.init(3,1,mbs, bs)
+    ax.init(2,3)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     dp_rank = ax.config.data_parallel_rank
@@ -24,23 +24,19 @@ def test_vit_mnist():
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(root='./tests/datasets/', train=True, transform=ToTensor())
-    train_loader = ax.create_dataloader(train_dataset, bs, 0)
+    train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
+    
+    ax.print_status(len(train_loader))
 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
-
     for epoch_number in range(epochs):
-        train_iter = iter(train_loader)
         epoch_loss = 0
         acc = 0
-        while True:
-            x = None
-            y = None
+        batch_no = 0
+        for x,y in train_loader:
             optimizer.zero_grad()
             if ilp_rank == 0:
-                x,y = next(train_iter, (None, None))
-                if x is None:
-                    break
                 x,y = x.cuda(), y.cuda()
                 ax.comm_handle.send(y, G_inter-1, tag=0, async_op=False)
             elif ilp_rank == G_inter-1:
@@ -48,18 +44,8 @@ def test_vit_mnist():
                 ax.comm_handle.recv(y, 0, tag=0, async_op=False)
             batch_loss = ax.run_batch(x, y)
             optimizer.step()
-            if ilp_rank == G_inter -1:
-                ax.print_status(f"Batch Loss : {batch_loss}")
-        #optimizer.zero_grad()
-        #x = x.cuda()
-        #y = y.cuda()
-        #logits  = model(x)
-        #loss = loss_fn(logits,y)
-        #acc += torch.sum((torch.max(logits, 1)[1]) == (y)).item()
-        #epoch_loss += loss.item()
-        #loss.backward()
-        #optimizer.step()
-
-    #assert acc*100/len(train_loader)/bs > 95
+            epoch_loss += batch_loss
+        if ilp_rank == G_inter -1:
+            print(f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}")
 
 test_vit_mnist()
