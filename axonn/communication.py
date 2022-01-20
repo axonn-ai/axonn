@@ -14,13 +14,12 @@ class communication_handle:
     """
 
     def __init__(self, G_inter: int, G_data: int, gpus_per_node: int = None):
-        """ Constructor for the communication handle
+        """Constructor for the communication handle
 
         Arguments:
             G_inter (int): number of GPUs used for inter-layer parallelism
             G_data (int): number of GPUs used for data parallelism
-            gpus_per_node (int, optional): number of GPUs per node, if not provided this is inferred using pytorch 
-        
+            gpus_per_node (int, optional): number of GPUs per node, if not provided this is inferred using pytorch
         """
 
         self.world_rank = MPI.COMM_WORLD.Get_rank()
@@ -73,7 +72,6 @@ class communication_handle:
 
         Arguments:
             tensor (torch.Tensor): the Pytorch tensor
-            
         """
         return [
             MPI.memory.fromaddress(
