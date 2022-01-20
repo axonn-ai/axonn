@@ -9,7 +9,7 @@ from setuptools import setup
 setup(
     name="axonn",
     version="0.0.1",
-    description="An parallel library for extreme-scale deep learning",
+    description="A parallel library for extreme-scale deep learning",
     long_description="""An asynchronous, message-driven parallel framework for
         extreme-scale deep learning""",
     url="https://github.com/hpcgroup/axonn",
