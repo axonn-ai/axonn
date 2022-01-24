@@ -11,7 +11,7 @@ def test_vit_mnist():
     epochs=10
     N, D, H = 6, 128, 16
 
-    ax.init(1,6)
+    ax.init(3,2)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     dp_rank = ax.config.data_parallel_rank
