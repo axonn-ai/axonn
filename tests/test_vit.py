@@ -11,7 +11,7 @@ def test_vit_mnist():
     epochs=10
     N, D, H = 6, 128, 16
 
-    ax.init(2,3)
+    ax.init(1,6)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     dp_rank = ax.config.data_parallel_rank
@@ -23,7 +23,7 @@ def test_vit_mnist():
     ax.register_model(model)
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
-    train_dataset = torchvision.datasets.MNIST(root='./tests/datasets/', train=True, transform=ToTensor())
+    train_dataset = torchvision.datasets.MNIST(root='./tests/datasets/', train=True, transform=ToTensor()) 
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
     
     ax.print_status(len(train_loader))
@@ -38,10 +38,12 @@ def test_vit_mnist():
             optimizer.zero_grad()
             if ilp_rank == 0:
                 x,y = x.cuda(), y.cuda()
-                ax.comm_handle.send(y, G_inter-1, tag=0, async_op=False)
-            elif ilp_rank == G_inter-1:
-                y = torch.cuda.LongTensor(bs)
-                ax.comm_handle.recv(y, 0, tag=0, async_op=False)
+            if G_inter > 1:
+                if ilp_rank == 0:
+                    ax.comm_handle.send(y, G_inter-1, tag=0, async_op=False)
+                elif ilp_rank == G_inter-1:
+                    y = torch.cuda.LongTensor(bs)
+                    ax.comm_handle.recv(y, 0, tag=0, async_op=False)
             batch_loss = ax.run_batch(x, y)
             optimizer.step()
             epoch_loss += batch_loss

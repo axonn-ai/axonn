@@ -49,7 +49,7 @@ def create_dataloader(dataset: torch.utils.data.Dataset, batch_size: int, micro_
     if config.inter_layer_parallel_rank == 0:
         sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=config.G_data, rank=config.data_parallel_rank)
         data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=config.batch_size_per_network, shuffle=False, 
-                                                  num_workers=num_workers, sampler=sampler) #not working with drop_last=False
+                                                  num_workers=num_workers, sampler=sampler, drop_last=True) #not working with drop_last=False
         num_batches = len(data_loader)
     else:
         num_batches = 0
@@ -57,7 +57,8 @@ def create_dataloader(dataset: torch.utils.data.Dataset, batch_size: int, micro_
     if config.inter_layer_parallel_rank != 0:
         dataset = empty_dataset(len(dataset), len(dataset[0]))
         sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=config.G_data, rank=config.data_parallel_rank)
-        data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=config.batch_size_per_network, shuffle=False, num_workers=0, sampler=sampler)
+        data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=config.batch_size_per_network, 
+                                                  shuffle=False, num_workers=0, sampler=sampler, drop_last=True)
     return data_loader
 
 def _coalesce_and_reassign(tensors):
@@ -175,32 +176,42 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor):
     batch_loss = 0
     ilp_rank, dp_rank, G_inter, G_data = config.inter_layer_parallel_rank, config.data_parallel_rank, config.G_inter, config.G_data
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    remaining_microbatches = num_microbatches_per_network
-    num_msgs = remaining_microbatches
-    if ((ilp_rank != 0) and (ilp_rank != G_inter-1)):
-        num_msgs += remaining_microbatches
-
-    next_microbatch = 0
-    if ilp_rank == 0:
-        for _ in range(G_inter):
-            if remaining_microbatches == 0:
-                break
-            _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
-            next_microbatch += 1
-            remaining_microbatches -=1 
-
-    while num_msgs:
-        microbatch_no = _recv()
-        num_msgs -= 1
-        if ilp_rank == 0 and remaining_microbatches: #inject next microbatch
-            _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
-            next_microbatch += 1
-            remaining_microbatches -= 1
-        elif ilp_rank == G_inter -1:
+    if num_microbatches_per_network == 0:
+        print_status(f"{batch.shape}, {config.micro_batch_size}")
+    if G_inter == 1:
+        for microbatch_no in range(num_microbatches_per_network):
+            _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no)
             microbatch_loss = _calc_loss(microbatch_no, _get_subtensor(labels, microbatch_no))
             batch_loss += microbatch_loss.item()
             output_tensors_cache[microbatch_no] = microbatch_loss
             _backward_pass(None, microbatch_no)
+    else:
+        remaining_microbatches = num_microbatches_per_network
+        num_msgs = remaining_microbatches
+        if ((ilp_rank != 0) and (ilp_rank != G_inter-1)):
+            num_msgs += remaining_microbatches
+
+        next_microbatch = 0
+        if ilp_rank == 0:
+            for _ in range(G_inter):
+                if remaining_microbatches == 0:
+                    break
+                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
+                next_microbatch += 1
+                remaining_microbatches -=1 
+
+        while num_msgs:
+            microbatch_no = _recv()
+            num_msgs -= 1
+            if ilp_rank == 0 and remaining_microbatches: #inject next microbatch
+                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
+                next_microbatch += 1
+                remaining_microbatches -= 1
+            elif ilp_rank == G_inter -1:
+                microbatch_loss = _calc_loss(microbatch_no, _get_subtensor(labels, microbatch_no))
+                batch_loss += microbatch_loss.item()
+                output_tensors_cache[microbatch_no] = microbatch_loss
+                _backward_pass(None, microbatch_no)
 
     comm_handle.allreduce_data_parallel(model_grads/G_data/num_microbatches_per_network, async_op=False)
     return batch_loss/num_microbatches_per_network
