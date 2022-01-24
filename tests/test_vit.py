@@ -70,7 +70,9 @@ def test_vit_mnist():
             optimizer.step()
             epoch_loss += batch_loss
         if ilp_rank == G_inter - 1:
-            ax.print_status(f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}")
+            ax.print_status(
+                f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
+            )
 
 
 test_vit_mnist()
