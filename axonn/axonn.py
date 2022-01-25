@@ -10,21 +10,36 @@ from .communication import communication_handle
 import torch
 from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from enum import Enum
 
-is_initialized = False  # True when init has been called
-comm_handle = None  # Communication handle for point-to-point (MPI) and collective (NCCL) communication
-input_tensors_cache = {}  # store references to input activation
-output_tensors_cache = {}  # store references to output activation
-transit_tensors = []  # store (future object, tensor reference) for pending isends
+# True when init has been called
+is_initialized = False
+# Communication handle for point-to-point (MPI) and collective (NCCL) communication
+comm_handle = None
+# store references to input activation
+input_tensors_cache = {}
+# store references to output activation
+output_tensors_cache = {}
+# store (future object, tensor reference) for pending isends
+transit_tensors = []
+# store (future object, tensor reference) for pending irecvs
 requests = {
     "fw": None,
     "bw": None,
-}  # store (future object, tensor reference) for pending irecvs
-model = None  # store reference to model shard
-criterion = None  # loss function
-model_params = None  # reference to flattened model params (fp32)
-model_grads = None  # reference to flattened model gradients (fp32)
+}
+# store reference to model shard
+model = None
+# loss function
+criterion = None
+# reference to flattened model params (fp32)
+model_params = None
+# reference to flattened model gradients (fp32)
+model_grads = None
 
+
+class Operation(Enum):
+    FW = 0
+    BW = 1
 
 class empty_dataset(torch.utils.data.Dataset):
     """
@@ -54,7 +69,8 @@ class empty_dataset(torch.utils.data.Dataset):
 
 def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None) -> None:
     """
-    Initialize AxoNN's 2D parallelism with G_inter-way inter-layer parallelism and G_data-way data parallelism
+    Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
+    parallelism and G_data-way data parallelism
 
     Arguments:
         G_inter (int): number of GPUs used for inter-layer parallelism
@@ -80,7 +96,8 @@ def create_dataloader(
     num_workers: int = 0,
 ) -> torch.utils.data.DataLoader:
     """
-    Create dataloaders for each GPU. For inter_layer_parallel_rank > 0, this creates a proxy dataloader which returns zero tensors.
+    Create dataloaders for each GPU. For inter_layer_parallel_rank > 0,
+    this creates a proxy dataloader which returns zero tensors.
 
     Arguments:
         dataset (torch.utils.data.Dataset): a PyTorch dataset object
@@ -89,7 +106,9 @@ def create_dataloader(
         num_workers (int): number of worker processes in the dataloader
 
     Returns:
-        data_loader (torch.utils.data.DataLoader): the dataloader object which is a true dataloader for inter_layer_parallel_rank = 0, else it is a proxy dataloader
+        data_loader (torch.utils.data.DataLoader): the dataloader object which
+        is a true dataloader for inter_layer_parallel_rank = 0, else it is
+        a proxy dataloader
     """
     assert is_initialized
     config.micro_batch_size = micro_batch_size
@@ -111,11 +130,8 @@ def create_dataloader(
             sampler=sampler,
             drop_last=True,
         )  # not working with drop_last=False
-        num_batches = len(data_loader)
-    else:
-        num_batches = 0
 
-    if config.inter_layer_parallel_rank != 0:
+    else:
         dataset = empty_dataset(len(dataset), len(dataset[0]))
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
@@ -132,7 +148,8 @@ def create_dataloader(
 
 
 def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
-    """Coalesce tensors into a flattened 1D tensor and reassign them to subtensors in this 1D tensor.
+    """Coalesce tensors into a flattened 1D tensor and reassign them to
+    subtensors in this 1D tensor.
 
     Arguments:
         tensors (List[torch.Tensor]): list of tensors to be coalesced
@@ -153,7 +170,8 @@ def register_model(model_shard):
     """AxoNN's user facing function to register a model shard.
 
     Arguments:
-        model_shard (torch.nn.Module): the model shard created by the user to be registered
+        model_shard (torch.nn.Module): the model shard created by the
+        user to be registered
     """
     global model, model_params, model_grads
     assert is_initialized
@@ -182,8 +200,9 @@ def register_loss_fn(loss_fn):
 
 
 def _get_subtensor(tensor, microbatch_no):
-    """divide the tensor into equal tensors of micro_batch_size and retrieve the microbatch_no tensor.
-    Useful when fetching data corresponding to a microbatch from a batch/labels.
+    """divide the tensor into equal tensors of micro_batch_size and
+    retrieve the microbatch_no tensor. Useful when fetching data
+    corresponding to a microbatch from a batch/labels.
 
     Arguments:
         tensor (torch.Tensor): tensor to be divided
@@ -200,7 +219,8 @@ def print_status(msg):
         msg (str): message to be printed
     """
     print(
-        f"DP Rank : {config.data_parallel_rank} | ILP Rank : {config.inter_layer_parallel_rank} - {msg}"
+        f"DP Rank : {config.data_parallel_rank} |\
+ILP Rank : {config.inter_layer_parallel_rank} - {msg}"
     )
 
 
@@ -250,11 +270,7 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
     torch.cuda.synchronize()
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
 
-
-def _post_recv_requests():
-    """
-    post mpi irecv requests if they haven't been posted.
-    """
+def _post_fw_recv_requests():
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
         tensor = torch.cuda.FloatTensor(
             size=[config.micro_batch_size] + model.get_input_shape()
@@ -264,6 +280,8 @@ def _post_recv_requests():
             tensor,
             comm_handle.recv(tensor, config.inter_layer_parallel_rank - 1),
         ]
+
+def _post_bw_recv_requests():
     if (requests["bw"] is None) and (
         config.inter_layer_parallel_rank < config.G_inter - 1
     ):
@@ -275,47 +293,61 @@ def _post_recv_requests():
             comm_handle.recv(tensor, config.inter_layer_parallel_rank + 1),
         ]
 
+def _post_recv_requests():
+    """
+    post mpi irecv requests if they haven't been posted.
+    """
+    _post_fw_recv_requests()
+    _post_bw_recv_requests()
 
-def _recv() -> int:
+
+def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
     """
     Message driven scheduling of forward and backward passes for pipelining.
+    
+    Arguments:
+        post_new_requests(bool): Whether to post new receive requests  
 
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
-    _post_recv_requests()
     status = MPI.Status()
-    if config.inter_layer_parallel_rank == config.G_inter - 1:
+    if (requests["bw"] is None) and (requests["fw"] is not None):
         requests["fw"][1].Wait(status)
         tag = status.Get_tag()
         input_activation = requests["fw"][0]
         requests["fw"] = None
-        _post_recv_requests()
+        if post_fw_recv:
+            _post_fw_recv_requests()
         _forward_pass(input_activation, tag)
-        return tag
-    elif config.inter_layer_parallel_rank == 0:
+        op = Operation.FW
+    elif (requests["fw"] is None) and (requests["bw"] is not None):
         requests["bw"][1].Wait(status)
         tag = status.Get_tag()
         output_gradients = requests["bw"][0]
         requests["bw"] = None
-        _post_recv_requests()
+        if post_bw_recv:
+            _post_bw_recv_requests()
         _backward_pass(output_gradients, tag)
-        return tag
+        op = Operation.BW
     else:
         index = MPI.Request.Waitany([requests["fw"][1], requests["bw"][1]], status)
         tag = status.Get_tag()
         if index == 0:  # forward pass
             input_activation = requests["fw"][0]
             requests["fw"] = None
-            _post_recv_requests()
+            if post_fw_recv:
+                _post_fw_recv_requests()
             _forward_pass(input_activation, tag)
+            op = Operation.FW
         else:
             output_gradients = requests["bw"][0]
             requests["bw"] = None
-            _post_recv_requests()
+            if post_bw_recv:
+                _post_bw_recv_requests()
             _backward_pass(output_gradients, tag)
-        return tag
-
+            op = Operation.BW
+    return tag, op
 
 def _calc_loss(microbatch_no, microbatch_labels):
     """Calculate the loss for a given microbatch number and its corresponding labels
@@ -328,7 +360,8 @@ def _calc_loss(microbatch_no, microbatch_labels):
 
 
 def _backward_pass(output_gradients, microbatch_no):
-    """do the backward pass of a microbatch and send the input activation gradients to the previous GPU.
+    """do the backward pass of a microbatch and send the input activation gradients
+    to the previous GPU.
 
     Arguments:
         output gradients (torch.Tensor): the gradient of the loss wrt the output tensor
@@ -347,25 +380,26 @@ def _backward_pass(output_gradients, microbatch_no):
 
 
 def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
-    """Perform forward and backward pass on a batch. This function invokes inter-layer-parallelism followed by an all-reduce.
+    """Perform forward and backward pass on a batch. This function invokes
+    inter-layer-parallelism followed by an all-reduce.
 
     Arguments:
-        batch (torch.Tensor): the input batch, for inter-layer-parallel-rank > 0 this can be a proxy tensor with the first dimension equal to the batch size
-        labels (torch.Tensor): the true labels, for inter-layer-parallel-rank < G_inter-1, this can be None
+        batch (torch.Tensor): the input batch, for inter-layer-parallel-rank > 0
+        this can be a proxy tensor with the first dimension equal to the batch size
+        labels (torch.Tensor): the true labels, for inter-layer-parallel-rank
+        < G_inter-1, this can be None
 
     Returns:
-        loss (int): the loss on the batch for inter-layer-parallel-rank == G_inter - 1, else 0
+        loss (int): the loss on the batch for inter-layer-parallel-rank
+        == G_inter - 1, else 0
     """
     batch_loss = 0
-    ilp_rank, dp_rank, G_inter, G_data = (
+    ilp_rank, G_inter, G_data = (
         config.inter_layer_parallel_rank,
-        config.data_parallel_rank,
         config.G_inter,
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    if num_microbatches_per_network == 0:
-        print_status(f"{batch.shape}, {config.micro_batch_size}")
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
             _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no)
@@ -380,6 +414,13 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         num_msgs = remaining_microbatches
         if (ilp_rank != 0) and (ilp_rank != G_inter - 1):
             num_msgs += remaining_microbatches
+            forward_msgs = backward_msgs = num_msgs // 2
+        elif ilp_rank == 0:
+            backward_msgs = num_msgs
+            forward_msgs = 0
+        else:
+            forward_msgs = num_msgs
+            backward_msgs = 0
 
         next_microbatch = 0
         if ilp_rank == 0:
@@ -390,9 +431,14 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
                 next_microbatch += 1
                 remaining_microbatches -= 1
 
+        _post_recv_requests()
         while num_msgs:
-            microbatch_no = _recv()
+            microbatch_no, op = _recv(post_fw_recv = (forward_msgs > 1), post_bw_recv = (backward_msgs > 1))
             num_msgs -= 1
+            if op == Operation.FW:
+                forward_msgs -= 1
+            elif op == Operation.BW:
+                backward_msgs -= 1
             if ilp_rank == 0 and remaining_microbatches:  # inject next microbatch
                 _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
                 next_microbatch += 1

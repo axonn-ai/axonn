@@ -15,14 +15,12 @@ def test_vit_mnist():
     bs = 32 * 3 * 8
     mbs = 32
     epochs = 10
-    N, D, H = 6, 128, 16
+    N, D, H = 12, 768, 12
 
-    ax.init(3, 2)
+    ax.init(G_data=2, G_inter=3)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
-    dp_rank = ax.config.data_parallel_rank
     G_inter = ax.config.G_inter
-    G_data = ax.config.G_data
 
     model = DistributedViT(
         image_size=28,
@@ -48,15 +46,13 @@ def test_vit_mnist():
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 
-    ax.print_status(len(train_loader))
 
-    loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     for epoch_number in range(epochs):
         epoch_loss = 0
-        acc = 0
-        batch_no = 0
+        bn = 0
         for x, y in train_loader:
+            bn += 1
             optimizer.zero_grad()
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
@@ -64,7 +60,7 @@ def test_vit_mnist():
                 if ilp_rank == 0:
                     ax.comm_handle.send(y, G_inter - 1, tag=0, async_op=False)
                 elif ilp_rank == G_inter - 1:
-                    y = torch.cuda.LongTensor(bs)
+                    y = y.long().cuda()
                     ax.comm_handle.recv(y, 0, tag=0, async_op=False)
             batch_loss = ax.run_batch(x, y)
             optimizer.step()
@@ -73,6 +69,5 @@ def test_vit_mnist():
             ax.print_status(
                 f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
             )
-
 
 test_vit_mnist()
