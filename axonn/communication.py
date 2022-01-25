@@ -148,3 +148,7 @@ class communication_handle:
         return torch.distributed.all_reduce(
             tensor, group=self.coll_nccl_comm, async_op=async_op
         )
+
+    def broadcast_inter_layer(self, tensor, root):
+        mpi4py_compatible_array = self._torch_to_mpi(tensor)
+        self.p2p_mpi_comm.Bcast(mpi4py_compatible_array, root=root)

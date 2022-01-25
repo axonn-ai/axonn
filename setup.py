@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name="axonn",
@@ -17,5 +17,5 @@ setup(
     author_email="ssingh37@umd.edu, bhatele@cs.umd.edu",
     classifiers=["Development Status :: 2 - Pre-Alpha"],
     keywords="deep learning, distributed computing, parallel computing",
-    packages=[],
+    packages=find_packages(),
 )
