@@ -46,7 +46,6 @@ def test_vit_mnist():
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 
-
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     for epoch_number in range(epochs):
         epoch_loss = 0
@@ -69,5 +68,6 @@ def test_vit_mnist():
             ax.print_status(
                 f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
             )
+
 
 test_vit_mnist()

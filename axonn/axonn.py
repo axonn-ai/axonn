@@ -41,6 +41,7 @@ class Operation(Enum):
     FW = 0
     BW = 1
 
+
 class empty_dataset(torch.utils.data.Dataset):
     """
     Proxy dataset object for GPUs with inter_layer_parallel_rank > 0
@@ -270,6 +271,7 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
     torch.cuda.synchronize()
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
 
+
 def _post_fw_recv_requests():
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
         tensor = torch.cuda.FloatTensor(
@@ -280,6 +282,7 @@ def _post_fw_recv_requests():
             tensor,
             comm_handle.recv(tensor, config.inter_layer_parallel_rank - 1),
         ]
+
 
 def _post_bw_recv_requests():
     if (requests["bw"] is None) and (
@@ -293,6 +296,7 @@ def _post_bw_recv_requests():
             comm_handle.recv(tensor, config.inter_layer_parallel_rank + 1),
         ]
 
+
 def _post_recv_requests():
     """
     post mpi irecv requests if they haven't been posted.
@@ -304,9 +308,9 @@ def _post_recv_requests():
 def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
     """
     Message driven scheduling of forward and backward passes for pipelining.
-    
+
     Arguments:
-        post_new_requests(bool): Whether to post new receive requests  
+        post_new_requests(bool): Whether to post new receive requests
 
     Returns:
         tag(int): the tag of the received message which is the microbatch number
@@ -348,6 +352,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
             _backward_pass(output_gradients, tag)
             op = Operation.BW
     return tag, op
+
 
 def _calc_loss(microbatch_no, microbatch_labels):
     """Calculate the loss for a given microbatch number and its corresponding labels
@@ -433,7 +438,9 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
 
         _post_recv_requests()
         while num_msgs:
-            microbatch_no, op = _recv(post_fw_recv = (forward_msgs > 1), post_bw_recv = (backward_msgs > 1))
+            microbatch_no, op = _recv(
+                post_fw_recv=(forward_msgs > 1), post_bw_recv=(backward_msgs > 1)
+            )
             num_msgs -= 1
             if op == Operation.FW:
                 forward_msgs -= 1
