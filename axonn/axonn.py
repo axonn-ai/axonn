@@ -11,6 +11,8 @@ import torch
 from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from enum import Enum
+import apex.amp as amp
+
 
 # True when init has been called
 is_initialized = False
@@ -31,11 +33,16 @@ requests = {
 model = None
 # loss function
 criterion = None
-# reference to flattened model params (fp32)
-model_params = None
-# reference to flattened model gradients (fp32)
-model_grads = None
-
+# reference to flattened model params
+model_params_fp32, model_params_fp16 = None, None
+# reference to flattened model gradients
+model_grads_fp32, model_grads_fp16 = None, None
+# the computation dtype (one of fp16/fp32)
+computation_dtype = None
+# fp16 all reduce, only applicable with mixed precision
+_fp16_all_reduce = None
+# reference to optimizer
+fp32_optimizer = None
 
 class Operation(Enum):
     FW = 0
@@ -68,7 +75,7 @@ class empty_dataset(torch.utils.data.Dataset):
         return [0 for _ in range(self.num_tensors)]
 
 
-def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None) -> None:
+def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None, mixed_precision=False, fp16_allreduce=True) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
     parallelism and G_data-way data parallelism
@@ -78,14 +85,23 @@ def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None) -> None
         G_data (int): number of GPUs used for data parallelism
         gpus_per_node (int, optional):  number of GPUs per node, if not
             provided this is inferred using pytorch
+        mixed_precision (bool): whether to use mixed precision
+        fp16_allreduce (bool): invoke all reduce on fp16 parameters, only applicable when mixed precision is True
     """
-    global comm_handle, is_initialized
+    global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     comm_handle = communication_handle(G_inter, G_data, gpus_per_node)
     config.G_inter = G_inter
     config.G_data = G_data
     config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
     config.data_parallel_rank = comm_handle.data_parallel_rank
     is_initialized = True
+    # assert mixed_precision, "Only supports mixed precision at apex O2 level"
+    # assert fp16_allreduce, "Only supports fp-16 allreduce"
+    if mixed_precision:
+        computation_dtype = torch.float16
+    else:
+        computation_dtype = torch.float32
+    _fp16_all_reduce = fp16_allreduce
     if comm_handle.world_rank == 0:
         print(f"Running with G_data={config.G_data} X G_inter={config.G_inter}")
 
@@ -167,26 +183,72 @@ def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
     return flattened_tensor
 
 
-def register_model(model_shard):
-    """AxoNN's user facing function to register a model shard.
+def register_model_and_optimizer(model_shard, optimizer):
+    """AxoNN's user facing function to register a model shard and the corresponding optimizer.
 
     Arguments:
         model_shard (torch.nn.Module): the model shard created by the
         user to be registered
+        optimizer  (torch.nn.Optim): optimizer object for the model
     """
-    global model, model_params, model_grads
+    global model, model_params_fp32, model_grads_fp32, model_params_fp16, model_grads_fp16, fp32_optimizer
     assert is_initialized
+    # assert computation_dtype == torch.float16, f"Only mixed precision supported - {computation_dtype}"
+    if computation_dtype == torch.float16:
+        opt_level = 'O2'
+    else:
+        opt_level = 'O0'
+
     model = model_shard
-    model_params = _coalesce_and_reassign(list(model.parameters()))
+    model, optimizer = amp.initialize(models=model, optimizers=optimizer, opt_level=opt_level, loss_scale='dynamic')
+    optimizer._amp_lazy_init() # this typecasts all parameters 
+                               # in all optimizer groups to fp-32, 
+                               # but does not change the model parameters
+                               # also recasts the optimzier states by calling self.load_state_dict(self.state_dict())
+
+    stash = optimizer._amp_stash
+
+    if computation_dtype == torch.float16:
+        model_params = stash.all_fp16_params # these are fp-16 model parameters
+        optimizer_params = stash.all_fp32_from_fp16_params # these are fp-32 optimizer parameters
+    else:
+        model_params = stash.all_fp32_params
+        optimizer_params = stash.all_fp32_params
+        assert not stash.all_fp16_params, "all parameters must be fp-32"
+        # Here model_params and optimizer_params are same, model_params[0] is optimizer_params[0] should return True
+
+    model_params = _coalesce_and_reassign(model_params)
+    comm_handle.allreduce(
+        model_params/config.G_data, async_op=False
+    )  # sync all parameters across data parallel ranks
     model_grads = []
     for param in model.parameters():
         param.grad = torch.empty_like(param)
         model_grads.append(param.grad)
     model_grads = _coalesce_and_reassign(model_grads)
-    comm_handle.allreduce(
-        model_params, async_op=False
-    )  # sync all parameters across data parallel ranks
-    print_status(f"Number of params - {torch.numel(model_params)}")
+    fp32_optimizer = optimizer
+
+    if computation_dtype == torch.float16:
+        model_params_fp16 = model_params
+        model_grads_fp16 = model_grads
+    else:
+        model_params_fp32 = model_params
+        model_grads_fp32 = model_grads
+    
+    return model, optimizer
+    #if computation_dtype == torch.float32:
+    #    model_params_fp32 = model_params
+    #    model_grads_fp32 = model_grads
+    #    model_params_fp16 = model_grads_fp16 = None
+    #elif computation_dtype == torch.float16:
+    #    print(model_params.dtype, model_grads.dtype)
+    #    model_params_fp16 = model_params
+    #    model_grads_fp16 = model_grads
+    #    model_params_fp32 = model_params.float()
+    #    model_grads_fp32 = model_grads.float()
+
+    #print_status(f"Number of params - {torch.numel(model_params)}")
+    #print_status(f"{model.dtype}")
 
 
 def register_loss_fn(loss_fn):
@@ -372,11 +434,8 @@ def _backward_pass(output_gradients, microbatch_no):
         output gradients (torch.Tensor): the gradient of the loss wrt the output tensor
         microbatch_no (int): the microbatch number
     """
-    try:
+    with amp.scale_loss(output_tensors_cache[microbatch_no], fp32_optimizer) as scaled_loss:
         output_tensors_cache[microbatch_no].backward(output_gradients)
-    except Exception as e:
-        print_status(output_tensors_cache)
-        raise e
     input_tensor = input_tensors_cache[microbatch_no]
     del output_tensors_cache[microbatch_no]
     del input_tensors_cache[microbatch_no]
@@ -405,6 +464,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
+    assert num_microbatches_per_network == 1
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
             _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no)
@@ -458,7 +518,11 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
                 output_tensors_cache[microbatch_no] = microbatch_loss
                 _backward_pass(None, microbatch_no)
 
+    if computation_dtype == torch.float16:
+        grads = model_grads_fp16
+    else:
+        grads = model_grads_fp32
     comm_handle.allreduce(
-        model_grads / G_data / num_microbatches_per_network, async_op=False
+        grads / G_data / num_microbatches_per_network, async_op=False
     )
     return batch_loss / num_microbatches_per_network

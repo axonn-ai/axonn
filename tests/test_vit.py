@@ -9,15 +9,18 @@ import torchvision
 from models.vit import DistributedViT
 from torchvision.transforms import ToTensor
 import torch
+from tqdm import tqdm 
 
 
 def test_vit_mnist():
-    bs = 32 * 3 * 8
-    mbs = 32
+    bs_per_gpu = 64
+    num_gpus = 6
+    bs = num_gpus * bs_per_gpu
+    mbs = bs_per_gpu
     epochs = 10
     N, D, H = 12, 768, 12
 
-    ax.init(G_data=2, G_inter=3)
+    ax.init(G_data=num_gpus, G_inter=1, mixed_precision=True)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     G_inter = ax.config.G_inter
@@ -38,7 +41,9 @@ def test_vit_mnist():
         G_inter=G_inter,
     ).cuda()
 
-    ax.register_model(model)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    ax.register_model_and_optimizer(model, optimizer)
+
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
@@ -46,13 +51,9 @@ def test_vit_mnist():
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     for epoch_number in range(epochs):
         epoch_loss = 0
-        bn = 0
-        for x, y in train_loader:
-            bn += 1
-            optimizer.zero_grad()
+        for x, y in tqdm(train_loader, disable= not (ilp_rank == 0 and ax.config.data_parallel_rank == 0)):
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
             if G_inter > 1:
@@ -68,6 +69,5 @@ def test_vit_mnist():
             ax.print_status(
                 f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
             )
-
 
 test_vit_mnist()
