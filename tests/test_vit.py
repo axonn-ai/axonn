@@ -9,7 +9,7 @@ import torchvision
 from models.vit import DistributedViT
 from torchvision.transforms import ToTensor
 import torch
-from tqdm import tqdm 
+from tqdm import tqdm
 
 
 def test_vit_mnist():
@@ -20,7 +20,7 @@ def test_vit_mnist():
     epochs = 10
     N, D, H = 12, 768, 12
 
-    ax.init(G_data=num_gpus, G_inter=1, mixed_precision=True)
+    ax.init(G_data=2, G_inter=3, mixed_precision=True)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     G_inter = ax.config.G_inter
@@ -47,13 +47,16 @@ def test_vit_mnist():
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
-        root="./tests/datasets/", train=True, transform=ToTensor()
+        root="./tests/dataset/", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 
     for epoch_number in range(epochs):
         epoch_loss = 0
-        for x, y in tqdm(train_loader, disable= not (ilp_rank == 0 and ax.config.data_parallel_rank == 0)):
+        for x, y in tqdm(
+            train_loader,
+            disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
+        ):
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
             if G_inter > 1:
@@ -69,5 +72,6 @@ def test_vit_mnist():
             ax.print_status(
                 f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
             )
+
 
 test_vit_mnist()

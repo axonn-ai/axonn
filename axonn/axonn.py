@@ -11,8 +11,7 @@ import torch
 from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from enum import Enum
-import apex.amp as amp
-
+import numpy as np
 
 # True when init has been called
 is_initialized = False
@@ -41,9 +40,9 @@ model_grads_fp32, model_grads_fp16 = None, None
 computation_dtype = None
 # fp16 all reduce, only applicable with mixed precision
 _fp16_all_reduce = None
-# reference to optimizer
-fp32_optimizer = None
-
+# loss_scale
+loss_scale = 2.**16
+max_scale = 2.**24
 
 class Operation(Enum):
     FW = 0
@@ -190,6 +189,57 @@ def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
         old_tensor.data = new_tensor
     return flattened_tensor
 
+def _initialize_mixed_precision(model, optimizer):
+    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    assert computation_dtype == torch.float16, "call this method only for mixed precision"
+    model = model.half()
+    # now model and optimizer both point to fp16 weights
+    # change optimizer to point to fp32 weights
+    fp32_params = []
+    fp16_params = []
+    fp32_grads = []
+    fp16_grads = []
+    for group in optimizer.param_groups:
+        for param_no, param in enumerate(group['params']):
+            assert param.dtype == torch.float16, "currently does not handle a mix of fp-16/fp-32"
+            if param.requires_grad:
+                fp16_params.append(param)
+                param.grad = torch.zeros_like(param)
+                fp16_grads.append(param.grad)
+                fp32_param = param.detach().float()
+                fp32_params.append(fp32_param)
+                fp32_param.grad = torch.empty_like(fp32_param)
+                fp32_grads.append(fp32_param.grad)
+                group['params'][param_no] = fp32_param
+
+    optimizer.load_state_dict(optimizer.state_dict()) # trick to recast optimizer states
+
+    model_params_fp32 = _coalesce_and_reassign(fp32_params)
+    model_params_fp16 = _coalesce_and_reassign(fp16_params)
+    model_grads_fp32 =  _coalesce_and_reassign(fp32_grads)
+    model_grads_fp16 =  _coalesce_and_reassign(fp16_grads)
+
+    return model, optimizer
+
+def _initialize_full_precision(model, optimizer):
+    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    assert computation_dtype == torch.float32, "call this method only for mixed precision"
+    
+    fp32_params = []
+    fp32_grads = []
+    for group in optimizer.param_groups:
+        for param in group['params']:
+            if param.requires_grad:
+                fp32_params.append(param)
+                param.grad = torch.empty_like(param)
+                fp32_grads.append(param.grad)
+    
+    model_params_fp32 = _coalesce_and_reassign(fp32_params)
+    model_grads_fp32 = _coalesce_and_reassign(fp32_grads)
+    model_grads_fp16 = None
+    model_params_fp16 = None
+
+    return model, optimizer
 
 def register_model_and_optimizer(model_shard, optimizer):
     """AxoNN's user facing function to register a model shard and
@@ -200,53 +250,21 @@ def register_model_and_optimizer(model_shard, optimizer):
         user to be registered
         optimizer  (torch.nn.Optim): optimizer object for the model
     """
-    global model, model_params_fp32, model_grads_fp32, model_params_fp16, model_grads_fp16, fp32_optimizer
+    global model, model_params_fp32, model_grads_fp32, model_params_fp16, model_grads_fp16 
     assert is_initialized
-    if computation_dtype == torch.float16:
-        opt_level = "O2"
-    else:
-        opt_level = "O0"
 
     model = model_shard
-    model, optimizer = amp.initialize(
-        models=model, optimizers=optimizer, opt_level=opt_level, loss_scale="dynamic",
-        cast_model_outputs=computation_dtype  # nvidia apex typecasts to float32 by default, so need to set this
-    )
-    optimizer._amp_lazy_init()  # this typecasts all parameters
-    # in all optimizer groups to fp-32,
-    # but does not change the model parameters
-    # also recasts the optimzier states by calling self.load_state_dict(self.state_dict())
-
-    stash = optimizer._amp_stash
-
     if computation_dtype == torch.float16:
-        model_params = stash.all_fp16_params  # these are fp-16 model parameters
-        optimizer_params = (
-            stash.all_fp32_from_fp16_params
-        )  # these are fp-32 optimizer parameters
+        model, optimizer = _initialize_mixed_precision(model, optimizer)
+        model_params = model_params_fp16
     else:
-        model_params = stash.all_fp32_params
-        optimizer_params = stash.all_fp32_params
-        assert not stash.all_fp16_params, "all parameters must be fp-32"
-        # Here model_params and optimizer_params are same, model_params[0] is optimizer_params[0] should return True
+        model, optimizer = _initialize_full_precision(model, optimizer)
+        model_params = model_params_fp32
 
-    model_params = _coalesce_and_reassign(model_params)
     comm_handle.allreduce(
         model_params / config.G_data, async_op=False
     )  # sync all parameters across data parallel ranks
-    model_grads = []
-    for param in model.parameters():
-        param.grad = torch.empty_like(param)
-        model_grads.append(param.grad)
-    model_grads = _coalesce_and_reassign(model_grads)
-    fp32_optimizer = optimizer
 
-    if computation_dtype == torch.float16:
-        model_params_fp16 = model_params
-        model_grads_fp16 = model_grads
-    else:
-        model_params_fp32 = model_params
-        model_grads_fp32 = model_grads
     return model, optimizer
 
 
@@ -274,12 +292,13 @@ def _get_subtensor(tensor, microbatch_no):
     return tensor[start:end]
 
 
-def print_status(msg):
+def print_status(*msg):
     """print msg
 
     Arguments:
         msg (str): message to be printed
     """
+
     print(
         f"DP Rank : {config.data_parallel_rank} |\
 ILP Rank : {config.inter_layer_parallel_rank} - {msg}"
@@ -426,14 +445,15 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
     return tag, op
 
 
-def _calc_loss(microbatch_no, microbatch_labels):
+def _calc_loss(microbatch_no, microbatch_labels, mul_factor=1.):
     """Calculate the loss for a given microbatch number and its corresponding labels
 
     Arguments:
         microbatch_no (int): the microbatch number
         microbatch_labels (torch.Tensor): the true labels for the microbatch
+        mul_factor (float): premultiply loss by this number
     """
-    return criterion(output_tensors_cache[microbatch_no], microbatch_labels)
+    return mul_factor*criterion(output_tensors_cache[microbatch_no], microbatch_labels)
 
 
 def _backward_pass(output_gradients, microbatch_no):
@@ -444,6 +464,9 @@ def _backward_pass(output_gradients, microbatch_no):
         output gradients (torch.Tensor): the gradient of the loss wrt the output tensor
         microbatch_no (int): the microbatch number
     """
+    
+    global loss_scale
+
     with amp.scale_loss(
         output_tensors_cache[microbatch_no], fp32_optimizer
     ) as scaled_loss:
@@ -454,6 +477,14 @@ def _backward_pass(output_gradients, microbatch_no):
     if config.inter_layer_parallel_rank - 1 >= 0:
         _send(input_tensor.grad, config.inter_layer_parallel_rank - 1, microbatch_no)
 
+def _sync_scale():
+    global loss_scale
+    assert computation_dtype == torch.float16
+    scale_np = np.array(loss_scale, 'd')
+    scale_np_recv = np.array(loss_scale, 'd')
+    MPI.COMM_WORLD.Allreduce([scale_np, MPI.DOUBLE], [scale_np_recv, MPI.DOUBLE], op=MPI.MIN)
+    loss_scale = float(scale_np_recv)
+    print_status(loss_scale)
 
 def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
     """Perform forward and backward pass on a batch. This function invokes
@@ -469,6 +500,9 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         loss (int): the loss on the batch for inter-layer-parallel-rank
         == G_inter - 1, else 0
     """
+    if computation_dtype == torch.float16:
+        _sync_scale()
+    exit(-1)
     batch_loss = 0
     ilp_rank, G_inter, G_data = (
         config.inter_layer_parallel_rank,
@@ -523,7 +557,8 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
                 remaining_microbatches -= 1
             elif ilp_rank == G_inter - 1:
                 microbatch_loss = _calc_loss(
-                    microbatch_no, _get_subtensor(labels, microbatch_no)
+                    microbatch_no, _get_subtensor(labels, microbatch_no),
+                    1/G_data/num_microbatches_per_network
                 )
                 batch_loss += microbatch_loss.item()
                 output_tensors_cache[microbatch_no] = microbatch_loss
@@ -533,5 +568,5 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         grads = model_grads_fp16
     else:
         grads = model_grads_fp32
-    comm_handle.allreduce(grads / G_data / num_microbatches_per_network, async_op=False)
+    comm_handle.allreduce(grads, async_op=False)
     return batch_loss / num_microbatches_per_network
