@@ -44,6 +44,7 @@ _fp16_all_reduce = None
 # reference to optimizer
 fp32_optimizer = None
 
+
 class Operation(Enum):
     FW = 0
     BW = 1
@@ -75,7 +76,13 @@ class empty_dataset(torch.utils.data.Dataset):
         return [0 for _ in range(self.num_tensors)]
 
 
-def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None, mixed_precision=False, fp16_allreduce=True) -> None:
+def init(
+    G_inter: int,
+    G_data: int,
+    gpus_per_node: Optional[int] = None,
+    mixed_precision=False,
+    fp16_allreduce=True,
+) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
     parallelism and G_data-way data parallelism
@@ -86,7 +93,8 @@ def init(G_inter: int, G_data: int, gpus_per_node: Optional[int] = None, mixed_p
         gpus_per_node (int, optional):  number of GPUs per node, if not
             provided this is inferred using pytorch
         mixed_precision (bool): whether to use mixed precision
-        fp16_allreduce (bool): invoke all reduce on fp16 parameters, only applicable when mixed precision is True
+        fp16_allreduce (bool): invoke all reduce on fp16 parameters,
+        only applicable when mixed precision is True
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     comm_handle = communication_handle(G_inter, G_data, gpus_per_node)
@@ -184,7 +192,8 @@ def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
 
 
 def register_model_and_optimizer(model_shard, optimizer):
-    """AxoNN's user facing function to register a model shard and the corresponding optimizer.
+    """AxoNN's user facing function to register a model shard and
+    the corresponding optimizer.
 
     Arguments:
         model_shard (torch.nn.Module): the model shard created by the
@@ -193,24 +202,28 @@ def register_model_and_optimizer(model_shard, optimizer):
     """
     global model, model_params_fp32, model_grads_fp32, model_params_fp16, model_grads_fp16, fp32_optimizer
     assert is_initialized
-    # assert computation_dtype == torch.float16, f"Only mixed precision supported - {computation_dtype}"
     if computation_dtype == torch.float16:
-        opt_level = 'O2'
+        opt_level = "O2"
     else:
-        opt_level = 'O0'
+        opt_level = "O0"
 
     model = model_shard
-    model, optimizer = amp.initialize(models=model, optimizers=optimizer, opt_level=opt_level, loss_scale='dynamic')
-    optimizer._amp_lazy_init() # this typecasts all parameters 
-                               # in all optimizer groups to fp-32, 
-                               # but does not change the model parameters
-                               # also recasts the optimzier states by calling self.load_state_dict(self.state_dict())
+    model, optimizer = amp.initialize(
+        models=model, optimizers=optimizer, opt_level=opt_level, loss_scale="dynamic",
+        cast_model_outputs=computation_dtype  # nvidia apex typecasts to float32 by default, so need to set this
+    )
+    optimizer._amp_lazy_init()  # this typecasts all parameters
+    # in all optimizer groups to fp-32,
+    # but does not change the model parameters
+    # also recasts the optimzier states by calling self.load_state_dict(self.state_dict())
 
     stash = optimizer._amp_stash
 
     if computation_dtype == torch.float16:
-        model_params = stash.all_fp16_params # these are fp-16 model parameters
-        optimizer_params = stash.all_fp32_from_fp16_params # these are fp-32 optimizer parameters
+        model_params = stash.all_fp16_params  # these are fp-16 model parameters
+        optimizer_params = (
+            stash.all_fp32_from_fp16_params
+        )  # these are fp-32 optimizer parameters
     else:
         model_params = stash.all_fp32_params
         optimizer_params = stash.all_fp32_params
@@ -219,7 +232,7 @@ def register_model_and_optimizer(model_shard, optimizer):
 
     model_params = _coalesce_and_reassign(model_params)
     comm_handle.allreduce(
-        model_params/config.G_data, async_op=False
+        model_params / config.G_data, async_op=False
     )  # sync all parameters across data parallel ranks
     model_grads = []
     for param in model.parameters():
@@ -234,21 +247,7 @@ def register_model_and_optimizer(model_shard, optimizer):
     else:
         model_params_fp32 = model_params
         model_grads_fp32 = model_grads
-    
     return model, optimizer
-    #if computation_dtype == torch.float32:
-    #    model_params_fp32 = model_params
-    #    model_grads_fp32 = model_grads
-    #    model_params_fp16 = model_grads_fp16 = None
-    #elif computation_dtype == torch.float16:
-    #    print(model_params.dtype, model_grads.dtype)
-    #    model_params_fp16 = model_params
-    #    model_grads_fp16 = model_grads
-    #    model_params_fp32 = model_params.float()
-    #    model_grads_fp32 = model_grads.float()
-
-    #print_status(f"Number of params - {torch.numel(model_params)}")
-    #print_status(f"{model.dtype}")
 
 
 def register_loss_fn(loss_fn):
@@ -335,9 +334,14 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
 
 
 def _post_fw_recv_requests():
+    """
+    Post a receive request for a forward pass
+    """
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
-        tensor = torch.cuda.FloatTensor(
-            size=[config.micro_batch_size] + model.get_input_shape()
+        tensor = torch.empty(
+            size=[config.micro_batch_size] + model.get_input_shape(),
+            device='cuda',
+            dtype=computation_dtype
         )
         tensor.requires_grad = True
         requests["fw"] = [
@@ -347,11 +351,16 @@ def _post_fw_recv_requests():
 
 
 def _post_bw_recv_requests():
+    """
+    Post a receive request for a backward pass
+    """
     if (requests["bw"] is None) and (
         config.inter_layer_parallel_rank < config.G_inter - 1
     ):
-        tensor = torch.cuda.FloatTensor(
-            size=[config.micro_batch_size] + model.get_output_shape()
+        tensor = torch.empty(
+            size=[config.micro_batch_size] + model.get_output_shape(),
+            device='cuda',
+            dtype=computation_dtype
         )
         requests["bw"] = [
             tensor,
@@ -372,7 +381,8 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
     Message driven scheduling of forward and backward passes for pipelining.
 
     Arguments:
-        post_new_requests(bool): Whether to post new receive requests
+        post_fw_recv(bool): Post a new receive request for a forward pass if needed
+        post_bw_recv(bool): post a new receive request for a backward pass if needed
 
     Returns:
         tag(int): the tag of the received message which is the microbatch number
@@ -434,8 +444,10 @@ def _backward_pass(output_gradients, microbatch_no):
         output gradients (torch.Tensor): the gradient of the loss wrt the output tensor
         microbatch_no (int): the microbatch number
     """
-    with amp.scale_loss(output_tensors_cache[microbatch_no], fp32_optimizer) as scaled_loss:
-        output_tensors_cache[microbatch_no].backward(output_gradients)
+    with amp.scale_loss(
+        output_tensors_cache[microbatch_no], fp32_optimizer
+    ) as scaled_loss:
+        scaled_loss.backward(output_gradients)
     input_tensor = input_tensors_cache[microbatch_no]
     del output_tensors_cache[microbatch_no]
     del input_tensors_cache[microbatch_no]
@@ -449,7 +461,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
 
     Arguments:
         batch (torch.Tensor): the input batch, for inter-layer-parallel-rank > 0
-        this can be a proxy tensor with the first dimension equal to the batch size
+        this is a proxy tensor with the first dimension equal to the batch size
         labels (torch.Tensor): the true labels, for inter-layer-parallel-rank
         < G_inter-1, this can be None
 
@@ -464,7 +476,6 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    assert num_microbatches_per_network == 1
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
             _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no)
@@ -522,7 +533,5 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         grads = model_grads_fp16
     else:
         grads = model_grads_fp32
-    comm_handle.allreduce(
-        grads / G_data / num_microbatches_per_network, async_op=False
-    )
+    comm_handle.allreduce(grads / G_data / num_microbatches_per_network, async_op=False)
     return batch_loss / num_microbatches_per_network
