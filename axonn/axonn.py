@@ -43,8 +43,8 @@ computation_dtype = None
 # fp16 all reduce, only applicable with mixed precision
 _fp16_all_reduce = None
 # loss_scale
-loss_scale = 2.0 ** 16
-max_scale = 2.0 ** 24
+loss_scale = 2.0**16
+max_scale = 2.0**24
 scaling_window = 2000
 no_overflow_iters = 0
 

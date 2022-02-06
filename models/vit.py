@@ -68,7 +68,7 @@ class Attention(nn.Module):
         project_out = not (heads == 1 and inner_dim == dim)
 
         self.heads = heads
-        self.scale = dim_head ** -0.5
+        self.scale = dim_head**-0.5
 
         self.attend = nn.Softmax(dim=-1)
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
