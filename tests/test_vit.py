@@ -20,7 +20,7 @@ def test_vit_mnist():
     epochs = 10
     N, D, H = 12, 768, 12
 
-    ax.init(G_data=2, G_inter=3, mixed_precision=True)
+    ax.init(G_data=6, G_inter=1, mixed_precision=True)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     G_inter = ax.config.G_inter
@@ -57,6 +57,7 @@ def test_vit_mnist():
             train_loader,
             disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
         ):
+            optimizer.zero_grad()
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
             if G_inter > 1:
