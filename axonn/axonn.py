@@ -5,7 +5,7 @@
 
 
 from . import config
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from .communication import communication_handle
 import torch
 from mpi4py import MPI
@@ -198,7 +198,23 @@ def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
     return flattened_tensor
 
 
-def _initialize_mixed_precision(model, optimizer):
+def _initialize_mixed_precision(
+    model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    """
+    Initialize mixed precision. Makes model parameters and gradients fp-16 and
+    optimizer parameters as an fp-32 copy. Similar to Apex's O2 mode.
+    Also flattens fp-32/fp-16 parameters and gradients for a bulk
+    descaling and all-reduce.
+
+    Arguments:
+        model: model object on the GPU
+        optimizer: the optimizer for the model
+
+    Returns
+        model: modified model object with fp-16 parameters and gradients
+        optimizer : modified optimizer object with fp-32 parameters and gradients
+    """
     global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
     assert (
         computation_dtype == torch.float16
@@ -237,7 +253,13 @@ def _initialize_mixed_precision(model, optimizer):
     return model, optimizer
 
 
-def _initialize_full_precision(model, optimizer):
+def _initialize_full_precision(
+    model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    """
+    Initialize full precision training - leaves model and optimizer untouched.
+    Flattens fp-32 parameters and gradients.
+    """
     global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
     assert (
         computation_dtype == torch.float32
@@ -627,18 +649,32 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
 
 
 def _check_nan(tensor):
+    """
+    check a tensor for overflow
+
+    Arguments:
+        tensor (torch.Tensor): the tensor to be checked
+    Return
+        overflow (bool): true if there is overflow
+    """
     sum_ = tensor.sum()
     return (torch.isinf(sum_) + torch.isnan(sum_)) > 0
 
 
 def _allreduce_and_descale():
-
+    """
+    allreduce and descale the gradients in accoradance with mixed precision
+    semantics. For fp-16_all_reduce mode, we first all-reduce and then descale
+    to prevent underflow. Note that it is not possible to check for underflow
+    so it is absolutely essential to maintain this order. For fp-32 all reduce
+    mode, we first descale and then all-reduce. After descaling there cannot
+    be underflow so this order is safe and prevents overflow.
+    """
     # at this point for mixed precision we will have unscaled fp-16 gradients
     # for full precision we will have normal gradients
     with torch.no_grad():
         if computation_dtype == torch.float32:
-            grads = model_grads_fp32
-            comm_handle.allreduce(grads, async_op=False)
+            comm_handle.all_reduce(model_grads_fp32, async_op=False)
         else:
             if _fp16_all_reduce:
                 # first all reduce then descale to prevent underflow
@@ -649,7 +685,7 @@ def _allreduce_and_descale():
                 # first descale then allreduce to precent overflow
                 model_grads_fp32.copy_(model_grads_fp16)
                 model_grads_fp32.div_(loss_scale)
-                comm_handle.all_reduce(model_grads_fp32, async_op=False)
+                comm_handle.allreduce(model_grads_fp32, async_op=False)
 
             model_grads_fp16.zero_()
             local_overflow = _check_nan(model_grads_fp32)
