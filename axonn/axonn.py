@@ -7,6 +7,7 @@
 from . import config
 from typing import Optional, List, Tuple
 from .communication import communication_handle
+from .optim import CPUAdam
 import torch
 from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
@@ -48,6 +49,8 @@ max_scale = 2.0**24
 scaling_window = 2000
 no_overflow_iters = 0
 
+_cpu_offload=False
+
 
 class Operation(Enum):
     FW = 0
@@ -86,6 +89,7 @@ def init(
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
     fp16_allreduce=True,
+    cpu_offload=False
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -101,6 +105,7 @@ def init(
         only applicable when mixed precision is True
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
+    global _cpu_offload
     comm_handle = communication_handle(G_inter, G_data, gpus_per_node)
     config.G_inter = G_inter
     config.G_data = G_data
@@ -114,6 +119,7 @@ def init(
     else:
         computation_dtype = torch.float32
     _fp16_all_reduce = fp16_allreduce
+    _cpu_offload = cpu_offload
     if comm_handle.world_rank == 0:
         print(f"Running with G_data={config.G_data} X G_inter={config.G_inter}")
 
@@ -300,6 +306,9 @@ def register_model_and_optimizer(model_shard, optimizer):
     assert is_initialized
 
     model = model_shard
+    if _cpu_offload:
+        assert isinstance(optimizer, CPUAdam), "only AxoNN's implementation of Adam is supported"
+        exit(-1)
     if computation_dtype == torch.float16:
         model, optimizer = _initialize_mixed_precision(model, optimizer)
         model_params = model_params_fp16

@@ -5,6 +5,7 @@
 
 
 from axonn import axonn as ax
+from axonn import optim 
 import torchvision
 from models.vit import DistributedViT
 from torchvision.transforms import ToTensor
@@ -41,7 +42,7 @@ def test_vit_mnist():
         G_inter=G_inter,
     ).cuda()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = optim.CPUAdam(model.parameters(), lr=0.001)
     ax.register_model_and_optimizer(model, optimizer)
 
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
