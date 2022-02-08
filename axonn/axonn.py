@@ -360,7 +360,8 @@ def print_status(*msg):
 
     print(
         f"DP Rank : {config.data_parallel_rank} |\
-ILP Rank : {config.inter_layer_parallel_rank} - {msg}"
+ILP Rank : {config.inter_layer_parallel_rank} - ",
+        *msg,
     )
 
 
@@ -544,8 +545,8 @@ def _backward_pass(output_gradients, microbatch_no):
 def _sync_scale(local_overflow):
     global loss_scale, no_overflow_iters, max_scale
     assert computation_dtype == torch.float16
-    overflow_np = np.array(int(local_overflow), "d")
-    overflow_np_recv = np.array(int(local_overflow), "d")
+    overflow_np = np.array(int(local_overflow), "i")
+    overflow_np_recv = np.array(int(local_overflow), "i")
     MPI.COMM_WORLD.Allreduce(
         [overflow_np, MPI.INT], [overflow_np_recv, MPI.INT], op=MPI.SUM
     )

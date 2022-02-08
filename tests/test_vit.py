@@ -20,7 +20,7 @@ def test_vit_mnist():
     epochs = 10
     N, D, H = 12, 768, 12
 
-    ax.init(G_data=6, G_inter=1, mixed_precision=True, fp16_allreduce=True)
+    ax.init(G_data=1, G_inter=6, mixed_precision=True, fp16_allreduce=True)
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     G_inter = ax.config.G_inter
