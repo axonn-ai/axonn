@@ -1,0 +1,3 @@
+[submodule "external/megatron"]
+	path = external/megatron
+	url = https://github.com/siddharth9820/Megatron-LM
