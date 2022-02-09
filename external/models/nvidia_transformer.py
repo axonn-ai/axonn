@@ -7,6 +7,7 @@ from megatron.model.enums import AttnMaskType
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
+from axonn import axonn as ax
 
 @dataclass
 class MegatronArgs:
@@ -62,16 +63,16 @@ class GPTEmbeddings(nn.Module):
 
 class GPTLMPredictionHead(nn.Module):
     def __init__(self, embedding_weights):
-        super(BertLMPredictionHead, self).__init__()
+        super(GPTLMPredictionHead, self).__init__()
         #self.transform = BertPredictionHeadTransform(config)
 
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
-        self.decoder = nn.Linear(bert_model_embedding_weights.size(1),
-                                 bert_model_embedding_weights.size(0),
+        self.decoder = nn.Linear(embedding_weights.size(1),
+                                 embedding_weights.size(0),
                                  bias=False)
-        self.decoder.weight = bert_model_embedding_weights
-        self.bias = nn.Parameter(torch.zeros(bert_model_embedding_weights.size(0)))
+        self.decoder.weight = embedding_weights
+        self.bias = nn.Parameter(torch.zeros(embedding_weights.size(0)))
 
     def forward(self, hidden_states):
         hidden_states = self.decoder(hidden_states) + self.bias
@@ -107,17 +108,59 @@ def transformer_encoder(num_layers: int,
     return ParallelTransformer(megatron_args, pre_process=pre_process, post_process=post_process, self_attn_mask_type=AttnMaskType.causal)
 
 class DistributedGPT(nn.Module):
-    def __init__(self, num_layers, hidden_size, num_attention_heads, vocab_size, ckp_coeff, ilp_rank, G_inter):
-        self.num_layers = num_layers
+    def __init__(self, num_layers, hidden_size, num_attention_heads, vocab_size, seq_len, ckp_coeff):
+        super(DistributedGPT, self).__init__()
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.vocab_size = vocab_size
         self.ckp_coeff = ckp_coeff
-        self.ilp_rank = ilp_rank
-        self.G_inter = G_inter
+        self.ilp_rank = ax.config.inter_layer_parallel_rank
+        self.G_inter = ax.config.G_inter
+        self.world_rank = ax.comm_handle.world_rank
+        self.attn_mask = torch.tril(
+                                torch.ones((1, seq_len, seq_len), device="cuda").view(seq_len, seq_len)
+                            )
+        self.attn_mask = (self.attn_mask < 0.5)
+        self.seq_len = seq_len
 
-        if ilp_rank == 0:
-            self.embeddings = GPTEmbeddings(vocab_size, hidden_size)
+        if self.ilp_rank == 0:
+            self.embeddings = GPTEmbeddings(vocab_size, hidden_size, seq_len, 0.1)
+        assert num_layers % self.G_inter == 0, "layers should be a multiple of G_inter"
+        self.num_layers = num_layers // self.G_inter
+        self.encoder = transformer_encoder(
+                                           num_layers=self.num_layers,
+                                           hidden_size=hidden_size,
+                                           num_attention_heads=num_attention_heads,
+                                           checkpoint_activations=True,
+                                           checkpoint_num_layers=ckp_coeff,
+                                           world_rank = self.world_rank,
+                                           pre_process = True, # (b s h)-> (s b h)
+                                           post_process = (self.ilp_rank == self.G_inter-1),
+                                           causal_attention = True
+                                        )
+        if self.ilp_rank == self.G_inter - 1:
+            if self.ilp_rank == 0:
+                temp_embedding = self.embeddings
+            else:
+                temp_embedding = GPTEmbeddings(vocab_size, hidden_size, seq_len, 0.1)
+            self.decoder = GPTLMPredictionHead(temp_embedding.word_embeddings.weight)
+
+    def get_input_shape(self):
+        return [self.seq_len, self.hidden_size]
+
+    def get_output_shape(self):
+        return [self.seq_len, self.hidden_size]
+    
+    def forward(self, x):
+        if self.ilp_rank == 0:
+            x = self.embeddings(x)
+        x = self.encoder(x, self.attn_mask)
+        if self.ilp_rank == self.G_inter-1:
+            x = self.decoder(x)
+        else:
+            x = x.transpose(0, 1).contiguous()
+        return x
+
 
 if __name__ == '__main__':
     hsize = 1024

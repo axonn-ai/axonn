@@ -80,7 +80,7 @@ class empty_dataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        return [0 for _ in range(self.num_tensors)]
+        return torch.Tensor([0 for _ in range(self.num_tensors)])
 
 
 def init(
@@ -129,6 +129,8 @@ def create_dataloader(
     batch_size: int,
     micro_batch_size: int,
     num_workers: int = 0,
+    *args,
+    **kwargs
 ) -> torch.utils.data.DataLoader:
     """
     Create dataloaders for each GPU. For inter_layer_parallel_rank > 0,
@@ -164,10 +166,13 @@ def create_dataloader(
             num_workers=num_workers,
             sampler=sampler,
             drop_last=True,
+            *args,
+            **kwargs
         )  # not working with drop_last=False
 
     else:
-        dataset = empty_dataset(len(dataset), len(dataset[0]))
+        num_tensors = 1 if torch.is_tensor(dataset[0]) else len(dataset[0])
+        dataset = empty_dataset(len(dataset), num_tensors)
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
         )
@@ -655,7 +660,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    if computation_dtype == torch.float16:
+    if computation_dtype == torch.float16 and batch.dtype==torch.float32:
         batch = batch.half()
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
