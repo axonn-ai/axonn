@@ -19,7 +19,7 @@ def test_vit_mnist():
     bs = num_gpus * bs_per_gpu
     mbs = bs_per_gpu
     epochs = 10
-    cpu_offload = False
+    cpu_offload = True
     N, D, H = 12, 768, 12
 
     ax.init(
@@ -58,7 +58,7 @@ def test_vit_mnist():
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
-        root="./tests/dataset/", train=True, transform=ToTensor()
+        root="./examples/dataset/", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 

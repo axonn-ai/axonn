@@ -53,6 +53,10 @@ _cpu_offload = False
 
 
 class Operation(Enum):
+    """
+    AxoNNs enum class for the 2 microbatch operations - forward and backward pass
+    """
+
     FW = 0
     BW = 1
 
@@ -80,7 +84,11 @@ class empty_dataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        return torch.Tensor([0 for _ in range(self.num_tensors)])
+        data = [0 for _ in range(self.num_tensors)]
+        if self.num_tensors == 1:
+            return torch.Tensor(data)
+        else:
+            return data
 
 
 def init(
@@ -103,6 +111,10 @@ def init(
         mixed_precision (bool): whether to use mixed precision
         fp16_allreduce (bool): invoke all reduce on fp16 parameters,
         only applicable when mixed precision is True
+        cpu_offload (bool): offload optimizer states and fp32 parameters to
+        the cpu to save gpu memory. Currently only works with
+        mixed_precision, fp16_allreduce and axonn.optim.CPUAdam optimizer.
+
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
@@ -130,7 +142,7 @@ def create_dataloader(
     micro_batch_size: int,
     num_workers: int = 0,
     *args,
-    **kwargs
+    **kwargs,
 ) -> torch.utils.data.DataLoader:
     """
     Create dataloaders for each GPU. For inter_layer_parallel_rank > 0,
@@ -167,7 +179,7 @@ def create_dataloader(
             sampler=sampler,
             drop_last=True,
             *args,
-            **kwargs
+            **kwargs,
         )  # not working with drop_last=False
 
     else:
@@ -337,6 +349,7 @@ def _initialize_mixed_precision_with_cpu_offload(
                 fp16_params.append(param)
                 param.grad = torch.zeros_like(param)
                 fp16_grads.append(param.grad)
+                # create fp32 parameters and move them to cpu
                 fp32_param = param.detach().float().cpu()
                 fp32_params.append(fp32_param)
                 group["params"][param_no] = fp32_param
@@ -660,7 +673,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    if computation_dtype == torch.float16 and batch.dtype==torch.float32:
+    if computation_dtype == torch.float16 and batch.dtype == torch.float32:
         batch = batch.half()
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
