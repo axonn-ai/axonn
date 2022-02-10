@@ -5,8 +5,9 @@
 
 
 from axonn import axonn as ax
+from axonn import optim
 import torchvision
-from models.vit import DistributedViT
+from external.models.vit import DistributedViT
 from torchvision.transforms import ToTensor
 import torch
 from tqdm import tqdm
@@ -18,9 +19,16 @@ def test_vit_mnist():
     bs = num_gpus * bs_per_gpu
     mbs = bs_per_gpu
     epochs = 10
+    cpu_offload = True
     N, D, H = 12, 768, 12
 
-    ax.init(G_data=1, G_inter=6, mixed_precision=True, fp16_allreduce=True)
+    ax.init(
+        G_data=2,
+        G_inter=3,
+        mixed_precision=True,
+        fp16_allreduce=True,
+        cpu_offload=cpu_offload,
+    )
 
     ilp_rank = ax.config.inter_layer_parallel_rank
     G_inter = ax.config.G_inter
@@ -41,13 +49,16 @@ def test_vit_mnist():
         G_inter=G_inter,
     ).cuda()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    if cpu_offload:
+        optimizer = optim.CPUAdam(model.parameters(), lr=0.001)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     ax.register_model_and_optimizer(model, optimizer)
 
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
-        root="./tests/dataset/", train=True, transform=ToTensor()
+        root="./examples/dataset/", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
 

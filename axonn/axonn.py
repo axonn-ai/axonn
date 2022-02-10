@@ -7,6 +7,7 @@
 from . import config
 from typing import Optional, List, Tuple
 from .communication import communication_handle
+from .optim import CPUAdam
 import torch
 from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
@@ -48,8 +49,14 @@ max_scale = 2.0**24
 scaling_window = 2000
 no_overflow_iters = 0
 
+_cpu_offload = False
+
 
 class Operation(Enum):
+    """
+    AxoNNs enum class for the 2 microbatch operations - forward and backward pass
+    """
+
     FW = 0
     BW = 1
 
@@ -77,7 +84,11 @@ class empty_dataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        return [0 for _ in range(self.num_tensors)]
+        data = [0 for _ in range(self.num_tensors)]
+        if self.num_tensors == 1:
+            return torch.Tensor(data)
+        else:
+            return data
 
 
 def init(
@@ -86,6 +97,7 @@ def init(
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
     fp16_allreduce=True,
+    cpu_offload=False,
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -99,8 +111,13 @@ def init(
         mixed_precision (bool): whether to use mixed precision
         fp16_allreduce (bool): invoke all reduce on fp16 parameters,
         only applicable when mixed precision is True
+        cpu_offload (bool): offload optimizer states and fp32 parameters to
+        the cpu to save gpu memory. Currently only works with
+        mixed_precision, fp16_allreduce and axonn.optim.CPUAdam optimizer.
+
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
+    global _cpu_offload
     comm_handle = communication_handle(G_inter, G_data, gpus_per_node)
     config.G_inter = G_inter
     config.G_data = G_data
@@ -114,6 +131,7 @@ def init(
     else:
         computation_dtype = torch.float32
     _fp16_all_reduce = fp16_allreduce
+    _cpu_offload = cpu_offload
     if comm_handle.world_rank == 0:
         print(f"Running with G_data={config.G_data} X G_inter={config.G_inter}")
 
@@ -123,6 +141,8 @@ def create_dataloader(
     batch_size: int,
     micro_batch_size: int,
     num_workers: int = 0,
+    *args,
+    **kwargs,
 ) -> torch.utils.data.DataLoader:
     """
     Create dataloaders for each GPU. For inter_layer_parallel_rank > 0,
@@ -158,10 +178,13 @@ def create_dataloader(
             num_workers=num_workers,
             sampler=sampler,
             drop_last=True,
+            *args,
+            **kwargs,
         )  # not working with drop_last=False
 
     else:
-        dataset = empty_dataset(len(dataset), len(dataset[0]))
+        num_tensors = 1 if torch.is_tensor(dataset[0]) else len(dataset[0])
+        dataset = empty_dataset(len(dataset), num_tensors)
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
         )
@@ -285,6 +308,63 @@ def _initialize_full_precision(
     return model, optimizer
 
 
+def _initialize_mixed_precision_with_cpu_offload(
+    model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    """
+    Initialize mixed precision. Makes model parameters and gradients fp-16 and
+    optimizer parameters as an fp-32 copy. Similar to Apex's O2 mode.
+    Also flattens fp-32/fp-16 parameters and gradients for a bulk
+    descaling and all-reduce.
+
+    Arguments:
+        model: model object on the GPU
+        optimizer: the optimizer for the model
+
+    Returns
+        model: modified model object with fp-16 parameters and gradients
+        optimizer : modified optimizer object with fp-32 parameters and gradients
+    """
+    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    assert (
+        computation_dtype == torch.float16
+    ), "CPU offload only supports mixed precision"
+    assert _fp16_all_reduce, "CPU offload only supports fp-16 allreduce"
+    assert isinstance(
+        optimizer, CPUAdam
+    ), "only AxoNN's implementation of Adam is supported"
+
+    model = model.half()
+    # now model and optimizer both point to fp16 weights
+    # change optimizer to point to fp32 weights
+    fp32_params = []
+    fp16_params = []
+    fp16_grads = []
+    for group in optimizer.param_groups:
+        for param_no, param in enumerate(group["params"]):
+            assert (
+                param.dtype == torch.float16
+            ), "currently does not handle a mix of fp-16/fp-32"
+            if param.requires_grad:
+                fp16_params.append(param)
+                param.grad = torch.zeros_like(param)
+                fp16_grads.append(param.grad)
+                # create fp32 parameters and move them to cpu
+                fp32_param = param.detach().float().cpu()
+                fp32_params.append(fp32_param)
+                group["params"][param_no] = fp32_param
+
+    optimizer.load_state_dict(
+        optimizer.state_dict()
+    )  # trick to recast optimizer states
+
+    model_params_fp32 = _coalesce_and_reassign(fp32_params)
+    model_params_fp16 = _coalesce_and_reassign(fp16_params)
+    model_grads_fp16 = _coalesce_and_reassign(fp16_grads)
+
+    return model, optimizer
+
+
 def register_model_and_optimizer(model_shard, optimizer):
     """AxoNN's user facing function to register a model shard and
     the corresponding optimizer.
@@ -300,7 +380,12 @@ def register_model_and_optimizer(model_shard, optimizer):
     assert is_initialized
 
     model = model_shard
-    if computation_dtype == torch.float16:
+    if _cpu_offload:
+        model, optimizer = _initialize_mixed_precision_with_cpu_offload(
+            model, optimizer
+        )
+        model_params = model_params_fp16
+    elif computation_dtype == torch.float16:
         model, optimizer = _initialize_mixed_precision(model, optimizer)
         model_params = model_params_fp16
     else:
@@ -308,7 +393,7 @@ def register_model_and_optimizer(model_shard, optimizer):
         model_params = model_params_fp32
 
     comm_handle.allreduce(
-        model_params / config.G_data, async_op=False
+        model_params.div_(config.G_data), async_op=False
     )  # sync all parameters across data parallel ranks
 
     fp32_optimizer = optimizer
@@ -321,7 +406,7 @@ def register_model_and_optimizer(model_shard, optimizer):
             unmodified_step()
             model_params_fp16.copy_(model_params_fp32)
 
-    if computation_dtype == torch.float16:
+    if computation_dtype == torch.float16 and not _cpu_offload:
         fp32_optimizer.step = types.MethodType(modified_step, fp32_optimizer)
 
     return model, optimizer
@@ -588,7 +673,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
-    if computation_dtype == torch.float16:
+    if computation_dtype == torch.float16 and batch.dtype == torch.float32:
         batch = batch.half()
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
@@ -645,7 +730,8 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
                 batch_loss += microbatch_loss.item()
                 _backward_pass(None, microbatch_no)
 
-    _allreduce_and_descale()
+    if not _cpu_offload:
+        _allreduce_and_descale()
     return batch_loss / num_microbatches_per_network
 
 
