@@ -20,24 +20,15 @@ seq_len = 128
 
 word2ind = init_vocab("./examples/dataset/PTB")
 train_dataset = ptb_dataset(
-    "./examples/dataset/PTB/",
-    seq_length=seq_len,
-    word2ind=word2ind,
-    split='train'
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="train"
 )
 
 val_dataset = ptb_dataset(
-    "./examples/dataset/PTB/",
-    seq_length=seq_len,
-    word2ind=word2ind,
-    split='valid'
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="valid"
 )
 
 test_dataset = ptb_dataset(
-    "./examples/dataset/PTB/",
-    seq_length=seq_len,
-    word2ind=word2ind,
-    split='test'
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="test"
 )
 
 ax.init(
@@ -102,6 +93,7 @@ ax.register_loss_fn(get_loss_fn())
 
 log_memory = False
 
+
 def evaluate(loader):
     val_loss = 0
     for sent in tqdm(
@@ -120,6 +112,7 @@ def evaluate(loader):
                 ax.comm_handle.recv(trg, 0, tag=0, async_op=False)
         val_loss += ax.run_batch(src, trg, eval_mode=True)
     return val_loss / len(val_loader)
+
 
 for epoch_number in range(num_epochs):
     epoch_loss = 0
@@ -154,7 +147,9 @@ for epoch_number in range(num_epochs):
     val_loss = evaluate(val_loader)
     if ilp_rank == G_inter - 1 and ax.config.data_parallel_rank == 0:
         ax.print_status(
-            f"Epoch {epoch_number+1} : train loss {epoch_loss/len(train_loader)} | val loss = {val_loss} val ppl = {np.exp(val_loss)}"
+            f"Epoch {epoch_number+1} : train loss"
+            f"{epoch_loss/len(train_loader)} | "
+            f"val loss = {val_loss} val ppl = {np.exp(val_loss)}"
         )
 test_ppl = np.exp(evaluate(test_loader))
-ax.print_status(f'Final test ppl = {test_ppl}')
+ax.print_status(f"Final test ppl = {test_ppl}")
