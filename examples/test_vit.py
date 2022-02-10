@@ -77,7 +77,7 @@ def test_vit_mnist():
                 elif ilp_rank == G_inter - 1:
                     y = y.long().cuda()
                     ax.comm_handle.recv(y, 0, tag=0, async_op=False)
-            batch_loss = ax.run_batch(x, y)
+            batch_loss = ax.run_batch(x, y, eval_mode=False)
             optimizer.step()
             epoch_loss += batch_loss
         if ilp_rank == G_inter - 1:

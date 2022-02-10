@@ -5,22 +5,31 @@ import torch
 from tqdm import tqdm
 import torch.nn as nn
 from ptb_loader import ptb_dataset, init_vocab
+import numpy as np
 
 
-dataset = ptb_dataset(
-    "./examples/dataset/PTB/",
-    seq_length=128,
-    word2ind=init_vocab("./examples/dataset/PTB"),
-)
-bs_per_gpu = 16
+bs_per_gpu = 8
 num_gpus = 6
 bs = num_gpus * bs_per_gpu
 mbs = bs_per_gpu
-epochs = 10
+num_epochs = 30
 cpu_offload = False
 vocab_size = 10000
-N, D, H = 24, 1024, 16
+N, D, H = 12, 768, 12
 seq_len = 128
+
+word2ind = init_vocab("./examples/dataset/PTB")
+train_dataset = ptb_dataset(
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="train"
+)
+
+val_dataset = ptb_dataset(
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="valid"
+)
+
+test_dataset = ptb_dataset(
+    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="test"
+)
 
 ax.init(
     G_data=6,
@@ -32,15 +41,22 @@ ax.init(
 
 ilp_rank = ax.config.inter_layer_parallel_rank
 G_inter = ax.config.G_inter
-num_epochs = 10
 
 train_loader = ax.create_dataloader(
-    dataset, batch_size=bs, micro_batch_size=mbs, num_workers=0
+    train_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=2
 )
 
 
+val_loader = ax.create_dataloader(
+    val_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=2
+)
+
+test_loader = ax.create_dataloader(
+    test_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=2
+)
+
 model = DistributedGPT(
-    N, D, H, vocab_size=vocab_size, seq_len=seq_len, ckp_coeff=8
+    N, D, H, vocab_size=vocab_size, seq_len=seq_len, ckp_coeff=4
 ).cuda()
 
 
@@ -76,6 +92,28 @@ ax.register_model_and_optimizer(model, optimizer)
 ax.register_loss_fn(get_loss_fn())
 
 log_memory = False
+
+
+def evaluate(loader):
+    val_loss = 0
+    for sent in tqdm(
+        loader,
+        disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
+    ):
+        src, trg = sent, sent
+        if ilp_rank == 0:
+            src = sent[:, :-1].cuda()
+            trg = sent[:, 1:].cuda()
+        if G_inter > 1:
+            if ilp_rank == 0:
+                ax.comm_handle.send(trg, G_inter - 1, tag=0, async_op=False)
+            elif ilp_rank == G_inter - 1:
+                trg = torch.cuda.LongTensor(len(sent), seq_len)
+                ax.comm_handle.recv(trg, 0, tag=0, async_op=False)
+        val_loss += ax.run_batch(src, trg, eval_mode=True)
+    return val_loss / len(val_loader)
+
+
 for epoch_number in range(num_epochs):
     epoch_loss = 0
     for sent in tqdm(
@@ -106,7 +144,12 @@ for epoch_number in range(num_epochs):
                 f"{torch.cuda.max_memory_allocated() /1e9} GB, "
             )
             log_memory = True
+    val_loss = evaluate(val_loader)
     if ilp_rank == G_inter - 1 and ax.config.data_parallel_rank == 0:
         ax.print_status(
-            f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
+            f"Epoch {epoch_number+1} : train loss"
+            f"{epoch_loss/len(train_loader)} | "
+            f"val loss = {val_loss} val ppl = {np.exp(val_loss)}"
         )
+test_ppl = np.exp(evaluate(test_loader))
+ax.print_status(f"Final test ppl = {test_ppl}")
