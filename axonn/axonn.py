@@ -450,17 +450,24 @@ ILP Rank : {config.inter_layer_parallel_rank} - ",
     )
 
 
-def _forward_pass(input_activation: torch.Tensor, microbatch_no: int):
+def _forward_pass(input_activation: torch.Tensor, microbatch_no: int, eval_mode: bool):
     """do the forward pass on an input activation and send the data to a forward GPU
 
     Arguments:
         input_activation (torch.Tensor): input activation from the previous GPU
         microbatch_no (int): the microbatch number of the input activation
+        eval_mode (bool): true if evaluating the model for validation/testing
 
     """
-    output_activation = model(input_activation)
-    input_tensors_cache[microbatch_no] = input_activation
-    output_tensors_cache[microbatch_no] = output_activation
+    if eval_mode:
+        with torch.no_grad():
+            output_activation = model(input_activation)
+        if config.inter_layer_parallel_rank == config.G_inter - 1:
+            output_tensors_cache[microbatch_no] = output_activation
+    else:
+        output_activation = model(input_activation)
+        input_tensors_cache[microbatch_no] = input_activation
+        output_tensors_cache[microbatch_no] = output_activation
     if config.inter_layer_parallel_rank + 1 < config.G_inter:
         _send(output_activation, config.inter_layer_parallel_rank + 1, microbatch_no)
 
@@ -532,22 +539,24 @@ def _post_bw_recv_requests():
         ]
 
 
-def _post_recv_requests():
+def _post_recv_requests(post_fw_recv=True, post_bw_recv=True):
     """
     post mpi irecv requests if they haven't been posted.
     """
-    _post_fw_recv_requests()
-    _post_bw_recv_requests()
+    if post_fw_recv:
+        _post_fw_recv_requests()
+    if post_bw_recv:
+        _post_bw_recv_requests()
 
 
-def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
+def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
     """
     Message driven scheduling of forward and backward passes for pipelining.
 
     Arguments:
         post_fw_recv(bool): Post a new receive request for a forward pass if needed
         post_bw_recv(bool): post a new receive request for a backward pass if needed
-
+        eval_mode(bool): True if evaluating
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
@@ -559,7 +568,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
         requests["fw"] = None
         if post_fw_recv:
             _post_fw_recv_requests()
-        _forward_pass(input_activation, tag)
+        _forward_pass(input_activation, tag, eval_mode)
         op = Operation.FW
     elif (requests["fw"] is None) and (requests["bw"] is not None):
         requests["bw"][1].Wait(status)
@@ -578,7 +587,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
             requests["fw"] = None
             if post_fw_recv:
                 _post_fw_recv_requests()
-            _forward_pass(input_activation, tag)
+            _forward_pass(input_activation, tag, eval_mode)
             op = Operation.FW
         else:
             output_gradients = requests["bw"][0]
@@ -590,7 +599,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True) -> int:
     return tag, op
 
 
-def _calc_loss(microbatch_no, microbatch_labels, mul_factor=1.0):
+def _calc_loss(microbatch_no, microbatch_labels, mul_factor=1.0, eval_mode=False):
     """Calculate the loss for a given microbatch number and its corresponding labels
 
     Arguments:
@@ -607,6 +616,8 @@ def _calc_loss(microbatch_no, microbatch_labels, mul_factor=1.0):
         # prevent underflow
     else:
         output_tensors_cache[microbatch_no] = mul_factor * loss
+    if eval_mode:
+        del output_tensors_cache[microbatch_no]
     return loss
 
 
@@ -652,7 +663,7 @@ def _sync_scale(local_overflow):
     return global_overflow
 
 
-def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
+def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int:
     """Perform forward and backward pass on a batch. This function invokes
     inter-layer-parallelism followed by an all-reduce.
 
@@ -661,9 +672,10 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         this is a proxy tensor with the first dimension equal to the batch size
         labels (torch.Tensor): the true labels, for inter-layer-parallel-rank
         < G_inter-1, this can be None
+        eval_mode (bool): set to true if you are doing validation/testing
 
     Returns:
-        loss (int): the loss on the batch for inter-layer-parallel-rank
+        loss (float): the loss on the batch for inter-layer-parallel-rank
         == G_inter - 1, else 0
     """
     batch_loss = 0
@@ -673,18 +685,27 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         config.G_data,
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
+
     if computation_dtype == torch.float16 and batch.dtype == torch.float32:
         batch = batch.half()
+
+    if eval_mode:
+        model.eval()
+    else:
+        model.train()
+
     if G_inter == 1:
         for microbatch_no in range(num_microbatches_per_network):
-            _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no)
+            _forward_pass(_get_subtensor(batch, microbatch_no), microbatch_no, eval_mode)
             microbatch_loss = _calc_loss(
                 microbatch_no,
                 _get_subtensor(labels, microbatch_no),
                 1 / G_data / num_microbatches_per_network,
+                eval_mode
             )
             batch_loss += microbatch_loss.item()
-            _backward_pass(None, microbatch_no)
+            if not eval_mode:
+                _backward_pass(None, microbatch_no)
     else:
         remaining_microbatches = num_microbatches_per_network
         num_msgs = remaining_microbatches
@@ -697,20 +718,22 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
         else:
             forward_msgs = num_msgs
             backward_msgs = 0
-
+        if eval_mode:
+            num_msgs -= backward_msgs
+            backward_msgs = 0
         next_microbatch = 0
         if ilp_rank == 0:
             for _ in range(G_inter):
                 if remaining_microbatches == 0:
                     break
-                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
+                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch, eval_mode)
                 next_microbatch += 1
                 remaining_microbatches -= 1
 
-        _post_recv_requests()
+        _post_recv_requests(post_fw_recv=(forward_msgs > 1), post_bw_recv=(backward_msgs > 1))
         while num_msgs:
             microbatch_no, op = _recv(
-                post_fw_recv=(forward_msgs > 1), post_bw_recv=(backward_msgs > 1)
+                post_fw_recv=(forward_msgs > 1), post_bw_recv=(backward_msgs > 1), eval_mode = eval_mode
             )
             num_msgs -= 1
             if op == Operation.FW:
@@ -718,7 +741,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
             elif op == Operation.BW:
                 backward_msgs -= 1
             if ilp_rank == 0 and remaining_microbatches:  # inject next microbatch
-                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch)
+                _forward_pass(_get_subtensor(batch, next_microbatch), next_microbatch, eval_mode)
                 next_microbatch += 1
                 remaining_microbatches -= 1
             elif ilp_rank == G_inter - 1:
@@ -726,9 +749,11 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor) -> int:
                     microbatch_no,
                     _get_subtensor(labels, microbatch_no),
                     1 / G_data / num_microbatches_per_network,
+                    eval_mode
                 )
                 batch_loss += microbatch_loss.item()
-                _backward_pass(None, microbatch_no)
+                if not eval_mode:
+                    _backward_pass(None, microbatch_no)
 
     if not _cpu_offload:
         _allreduce_and_descale()
