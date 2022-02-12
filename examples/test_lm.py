@@ -5,31 +5,47 @@ import torch
 from tqdm import tqdm
 import torch.nn as nn
 from ptb_loader import ptb_dataset, init_vocab
+from wikitext_loader import wikitext_dataset
 import numpy as np
 
 
-bs_per_gpu = 8
+bs_per_gpu = 16
 num_gpus = 6
 bs = num_gpus * bs_per_gpu
 mbs = bs_per_gpu
 num_epochs = 30
 cpu_offload = False
-vocab_size = 10000
 N, D, H = 12, 768, 12
-seq_len = 128
+seq_len = 512
+dataset = "wikitext"  # one of ptb or wikitext
 
-word2ind = init_vocab("./examples/dataset/PTB")
-train_dataset = ptb_dataset(
-    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="train"
-)
-
-val_dataset = ptb_dataset(
-    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="valid"
-)
-
-test_dataset = ptb_dataset(
-    "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="test"
-)
+if dataset == "ptb":
+    word2ind = init_vocab("./examples/dataset/PTB")
+    train_dataset = ptb_dataset(
+        "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="train"
+    )
+    val_dataset = ptb_dataset(
+        "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="valid"
+    )
+    test_dataset = ptb_dataset(
+        "./examples/dataset/PTB/", seq_length=seq_len, word2ind=word2ind, split="test"
+    )
+    vocab_size = 10000
+    num_workers = 2
+    lr = 1e-4
+elif dataset == "wikitext":
+    train_dataset = wikitext_dataset(
+        "./examples/dataset/wikitext/", seq_length=seq_len, split="train"
+    )
+    val_dataset = wikitext_dataset(
+        "./examples/dataset/wikitext/", seq_length=seq_len, split="valid"
+    )
+    test_dataset = wikitext_dataset(
+        "./examples/dataset/wikitext/", seq_length=seq_len, split="test"
+    )
+    vocab_size = 50257
+    num_workers = 0  # segfaults with more than 0 workers
+    lr = 1e-3
 
 ax.init(
     G_data=6,
@@ -43,12 +59,12 @@ ilp_rank = ax.config.inter_layer_parallel_rank
 G_inter = ax.config.G_inter
 
 train_loader = ax.create_dataloader(
-    train_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=2
+    train_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=num_workers
 )
 
 
 val_loader = ax.create_dataloader(
-    val_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=2
+    val_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=num_workers
 )
 
 test_loader = ax.create_dataloader(
@@ -84,9 +100,9 @@ def get_loss_fn():
 
 
 if cpu_offload:
-    optimizer = optim.CPUAdam(model.parameters(), lr=0.0001)
+    optimizer = optim.CPUAdam(model.parameters(), lr=lr)
 else:
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
 ax.register_model_and_optimizer(model, optimizer)
 ax.register_loss_fn(get_loss_fn())

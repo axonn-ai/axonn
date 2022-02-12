@@ -46,7 +46,8 @@ _fp16_all_reduce = None
 # loss_scale
 loss_scale = 2.0**16
 max_scale = 2.0**24
-scaling_window = 2000
+min_scale = 2.0**10
+scaling_window = 200
 no_overflow_iters = 0
 
 _cpu_offload = False
@@ -647,7 +648,7 @@ def _sync_scale(local_overflow):
         [overflow_np, MPI.INT], [overflow_np_recv, MPI.INT], op=MPI.SUM
     )
     if overflow_np_recv > 0:
-        loss_scale = loss_scale / 2.0
+        loss_scale = max(loss_scale / 2.0, min_scale)
         if comm_handle.world_rank == 0:
             print_status(f"overflow detected - reducing loss scale to {loss_scale}")
         no_overflow_iters = 0
