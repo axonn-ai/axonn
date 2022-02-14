@@ -211,7 +211,7 @@ class DistributedViT(nn.Module):
         return x
 
     def get_input_shape(self):
-        return self.input_shape
+        return [-1] + self.input_shape
 
     def get_output_shape(self):
-        return self.output_shape
+        return [-1] + self.output_shape

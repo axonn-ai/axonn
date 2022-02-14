@@ -154,7 +154,7 @@ class DistributedGPT(nn.Module):
             checkpoint_activations=True,
             checkpoint_num_layers=ckp_coeff,
             world_rank=self.world_rank,
-            pre_process=True,  # (b s h)-> (s b h)
+            pre_process=(self.ilp_rank == 0),
             post_process=(self.ilp_rank == self.G_inter - 1),
             causal_attention=True,
         )
@@ -166,10 +166,10 @@ class DistributedGPT(nn.Module):
             self.decoder = GPTLMPredictionHead(temp_embedding.word_embeddings.weight)
 
     def get_input_shape(self):
-        return [self.seq_len, self.hidden_size]
+        return [self.seq_len, -1, self.hidden_size]
 
     def get_output_shape(self):
-        return [self.seq_len, self.hidden_size]
+        return [self.seq_len, -1, self.hidden_size]
 
     def forward(self, x):
         if self.ilp_rank == 0:
@@ -177,8 +177,6 @@ class DistributedGPT(nn.Module):
         x = self.encoder(x, self.attn_mask)
         if self.ilp_rank == self.G_inter - 1:
             x = self.decoder(x)
-        else:
-            x = x.transpose(0, 1).contiguous()
         return x
 
 

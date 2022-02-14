@@ -504,6 +504,8 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
     torch.cuda.synchronize()
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
 
+def _fill_shape(shape):
+    return [config.micro_batch_size if x == -1 else x for x in shape]
 
 def _post_fw_recv_requests():
     """
@@ -511,7 +513,7 @@ def _post_fw_recv_requests():
     """
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
         tensor = torch.empty(
-            size=[config.micro_batch_size] + model.get_input_shape(),
+            size=_fill_shape(model.get_input_shape()),
             device="cuda",
             dtype=computation_dtype,
         )
@@ -530,7 +532,7 @@ def _post_bw_recv_requests():
         config.inter_layer_parallel_rank < config.G_inter - 1
     ):
         tensor = torch.empty(
-            size=[config.micro_batch_size] + model.get_output_shape(),
+            size=_fill_shape(model.get_output_shape()),
             device="cuda",
             dtype=computation_dtype,
         )
