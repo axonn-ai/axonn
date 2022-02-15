@@ -39,18 +39,19 @@ class MegatronArgs:
     hidden_dropout: float = 0.1
     bias_dropout_fusion: float = True
 
+
 try:
-    import apex
-    #apex.amp.register_half_function(apex.normalization.fused_layer_norm, 'FusedLayerNorm')
-    import apex.normalization
     from apex.normalization.fused_layer_norm import FusedLayerNormAffineFunction
-    #apex.amp.register_float_function(apex.normalization.FusedLayerNorm, 'forward')
-    #BertLayerNorm = apex.normalization.FusedLayerNorm
+
     APEX_IS_AVAILABLE = True
 except ImportError:
-    print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
-    #BertLayerNorm = BertNonFusedLayerNorm
+    print(
+        "Better speed can be achieved with apex"
+        "installed from https://www.github.com/nvidia/apex."
+    )
+    # BertLayerNorm = BertNonFusedLayerNorm
     APEX_IS_AVAILABLE = False
+
 
 class NvidiaLayerNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-12):
@@ -64,20 +65,21 @@ class NvidiaLayerNorm(nn.Module):
     @torch.jit.unused
     def fused_layer_norm(self, x):
         return FusedLayerNormAffineFunction.apply(
-                    x, self.weight, self.bias, self.shape, self.eps)
-
+            x, self.weight, self.bias, self.shape, self.eps
+        )
 
     def forward(self, x):
         if self.apex_enabled and not torch.jit.is_scripting():
             x = self.fused_layer_norm(x)
         else:
             u = x.mean(-1, keepdim=True)
-            s = (x - u)
+            s = x - u
             s = s * s
             s = s.mean(-1, keepdim=True)
             x = (x - u) / torch.sqrt(s + self.eps)
             x = self.weight * x + self.bias
         return x
+
 
 class GPTEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""

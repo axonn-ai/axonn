@@ -504,8 +504,10 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
     torch.cuda.synchronize()
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
 
+
 def _fill_shape(shape):
     return [config.micro_batch_size if x == -1 else x for x in shape]
+
 
 def _post_fw_recv_requests():
     """
