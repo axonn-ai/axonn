@@ -40,6 +40,47 @@ class MegatronArgs:
     bias_dropout_fusion: float = True
 
 
+try:
+    from apex.normalization.fused_layer_norm import FusedLayerNormAffineFunction
+
+    APEX_IS_AVAILABLE = True
+except ImportError:
+    print(
+        "Better speed can be achieved with apex"
+        "installed from https://www.github.com/nvidia/apex."
+    )
+    # BertLayerNorm = BertNonFusedLayerNorm
+    APEX_IS_AVAILABLE = False
+
+
+class NvidiaLayerNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-12):
+        super(NvidiaLayerNorm, self).__init__()
+        self.shape = torch.Size((hidden_size,))
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.bias = nn.Parameter(torch.zeros(hidden_size))
+        self.apex_enabled = APEX_IS_AVAILABLE
+
+    @torch.jit.unused
+    def fused_layer_norm(self, x):
+        return FusedLayerNormAffineFunction.apply(
+            x, self.weight, self.bias, self.shape, self.eps
+        )
+
+    def forward(self, x):
+        if self.apex_enabled and not torch.jit.is_scripting():
+            x = self.fused_layer_norm(x)
+        else:
+            u = x.mean(-1, keepdim=True)
+            s = x - u
+            s = s * s
+            s = s.mean(-1, keepdim=True)
+            x = (x - u) / torch.sqrt(s + self.eps)
+            x = self.weight * x + self.bias
+        return x
+
+
 class GPTEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
@@ -47,7 +88,7 @@ class GPTEmbeddings(nn.Module):
         super(GPTEmbeddings, self).__init__()
         self.word_embeddings = nn.Embedding(vocab_size, hidden_size)
         self.position_embeddings = nn.Embedding(seq_len, hidden_size)
-        self.LayerNorm = nn.LayerNorm(hidden_size, eps=1e-12)
+        self.LayerNorm = NvidiaLayerNorm(hidden_size, eps=1e-12)
         self.dropout = nn.Dropout(dropout_prob)
 
     def forward(self, input_ids):
@@ -61,7 +102,7 @@ class GPTEmbeddings(nn.Module):
         position_embeddings = self.position_embeddings(position_ids)
 
         embeddings = words_embeddings + position_embeddings
-        embeddings = self.LayerNorm(embeddings)
+        # embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -154,7 +195,7 @@ class DistributedGPT(nn.Module):
             checkpoint_activations=True,
             checkpoint_num_layers=ckp_coeff,
             world_rank=self.world_rank,
-            pre_process=True,  # (b s h)-> (s b h)
+            pre_process=(self.ilp_rank == 0),
             post_process=(self.ilp_rank == self.G_inter - 1),
             causal_attention=True,
         )
@@ -166,10 +207,10 @@ class DistributedGPT(nn.Module):
             self.decoder = GPTLMPredictionHead(temp_embedding.word_embeddings.weight)
 
     def get_input_shape(self):
-        return [self.seq_len, self.hidden_size]
+        return [self.seq_len, -1, self.hidden_size]
 
     def get_output_shape(self):
-        return [self.seq_len, self.hidden_size]
+        return [self.seq_len, -1, self.hidden_size]
 
     def forward(self, x):
         if self.ilp_rank == 0:
@@ -177,8 +218,6 @@ class DistributedGPT(nn.Module):
         x = self.encoder(x, self.attn_mask)
         if self.ilp_rank == self.G_inter - 1:
             x = self.decoder(x)
-        else:
-            x = x.transpose(0, 1).contiguous()
         return x
 
 

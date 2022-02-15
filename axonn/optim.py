@@ -16,7 +16,7 @@ class CPUAdam(Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=1e-2,
-        bucket_size=4000000,
+        bucket_size=16000000,
         coalescing_factor=4,
     ):
 
@@ -161,7 +161,7 @@ class CPUAdam(Optimizer):
                         chunk_no += 1
                         continue
 
-                    F.adamw(
+                    F.adam(
                         [param_buffer[:size]],
                         [fp32_grad],
                         [exp_avg_buffer[:size]],

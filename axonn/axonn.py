@@ -505,13 +505,17 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
 
 
+def _fill_shape(shape):
+    return [config.micro_batch_size if x == -1 else x for x in shape]
+
+
 def _post_fw_recv_requests():
     """
     Post a receive request for a forward pass
     """
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
         tensor = torch.empty(
-            size=[config.micro_batch_size] + model.get_input_shape(),
+            size=_fill_shape(model.get_input_shape()),
             device="cuda",
             dtype=computation_dtype,
         )
@@ -530,7 +534,7 @@ def _post_bw_recv_requests():
         config.inter_layer_parallel_rank < config.G_inter - 1
     ):
         tensor = torch.empty(
-            size=[config.micro_batch_size] + model.get_output_shape(),
+            size=_fill_shape(model.get_output_shape()),
             device="cuda",
             dtype=computation_dtype,
         )
@@ -766,6 +770,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 if not eval_mode:
                     _backward_pass(None, microbatch_no)
 
+        _clear_transit_tensors(clear_all=True)
     if not _cpu_offload:
         _allreduce_and_descale()
     return batch_loss / num_microbatches_per_network
