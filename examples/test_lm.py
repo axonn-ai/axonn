@@ -1,6 +1,7 @@
 from axonn import axonn as ax
 from axonn import optim
 from external.models.nvidia_transformer import DistributedGPT
+from external.dataloaders.megatron_loader import wikitext_dataloader
 import torch
 from tqdm import tqdm
 import torch.nn as nn
@@ -8,6 +9,8 @@ from ptb_loader import ptb_dataset, init_vocab
 from wikitext_loader import wikitext_dataset
 import numpy as np
 import argparse
+import time
+import os
 
 def create_dataset(dataset_name, seq_len):
     if dataset_name == "ptb":
@@ -33,6 +36,20 @@ def create_dataset(dataset_name, seq_len):
         )
     return train_dataset, val_dataset, test_dataset
 
+
+def create_megatron_loader(batch_size, seq_length, num_workers):
+    summit_home = "/gpfs/alpine/csc452/scratch/ssingh37/"
+    data_prefix = os.path.join(summit_home, "gpt2_data/wikitext_103_text_document")
+    merge_file = os.path.join(summit_home, "gpt2_data/gpt2-merges.txt")
+    vocab_file = os.path.join(summit_home, "gpt2_data/gpt2-vocab.json")
+    dp_rank = ax.config.data_parallel_rank
+    dp_size = ax.config.G_data
+    batch_size = batch_size
+    seq_len = seq_length
+    num_workers = num_workers
+    return wikitext_dataloader(data_prefix, merge_file, vocab_file, dp_rank, dp_size, batch_size, seq_len, num_workers)
+
+
 def init_weights(module):
     """Initialize the weights."""
     if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -54,6 +71,7 @@ def get_loss_fn():
 
 def run_epoch(dataloader, optimizer, eval_mode=False):
     epoch_loss = 0
+    start = time.time()
     for sent in tqdm(
         dataloader,
         disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
@@ -62,18 +80,24 @@ def run_epoch(dataloader, optimizer, eval_mode=False):
             optimizer.zero_grad()
         src, trg = sent, sent
         if ilp_rank == 0:
-            src = sent[:, :-1].cuda()
-            trg = sent[:, 1:].cuda()
+            src = src['text'][:, :-1].cuda()
+            trg = trg['text'][:, 1:].cuda()
         if G_inter > 1:
             if ilp_rank == 0:
                 ax.comm_handle.send(trg, G_inter - 1, tag=0, async_op=False)
             elif ilp_rank == G_inter - 1:
-                trg = torch.cuda.LongTensor(len(sent), seq_len)
+                trg = torch.cuda.LongTensor(len(trg), seq_len)
                 ax.comm_handle.recv(trg, 0, tag=0, async_op=False)
         epoch_loss += ax.run_batch(src, trg, eval_mode=eval_mode)
+        if ilp_rank == 0:
+            ax.print_status(f'Compute time = {time.time() - start}s')
         if not eval_mode:
             optimizer.step()
-    return epoch_loss / len(val_loader)
+        end = time.time()
+        if ilp_rank == 0:
+            ax.print_status(f'Batch time = {end-start} s')
+        start = time.time()
+    return epoch_loss / len(dataloader)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -111,13 +135,17 @@ if __name__ == "__main__":
     train_dataset, val_dataset, test_dataset = create_dataset(dataset, seq_len)
 
     if dataset == 'wikitext':
-        vocab_size, num_workers, lr = 50257, 0, 1e-3 # wikitext-103 dataset does not work with multiple workers
+        vocab_size, num_workers, lr = 51200, 0, 1e-3 # wikitext-103 dataset does not work with multiple workers
     else:
         vocab_size, num_workers, lr = 10000, 2, 1e-4
 
-    train_loader = ax.create_dataloader(
+    if ilp_rank != 0:
+        train_loader = ax.create_dataloader(
         train_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=num_workers
-    )
+        )
+
+    else:
+        train_loader = create_megatron_loader(bs//ax.config.G_data, seq_len, 2)
 
     val_loader = ax.create_dataloader(
         val_dataset, batch_size=bs, micro_batch_size=mbs, num_workers=num_workers

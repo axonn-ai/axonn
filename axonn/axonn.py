@@ -768,6 +768,7 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 if not eval_mode:
                     _backward_pass(None, microbatch_no)
 
+        _clear_transit_tensors(clear_all=True)
     if not _cpu_offload:
         _allreduce_and_descale()
     return batch_loss / num_microbatches_per_network
