@@ -397,6 +397,9 @@ def register_model_and_optimizer(model_shard, optimizer):
         model_params.div_(config.G_data), async_op=False
     )  # sync all parameters across data parallel ranks
 
+    if computation_dtype == torch.float16:
+        model_params_fp32.copy_(model_params_fp16)
+
     fp32_optimizer = optimizer
     fp32_optimizer.skip_next_step = False
 
