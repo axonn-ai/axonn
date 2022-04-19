@@ -17,5 +17,9 @@ setup(
     author_email="ssingh37@umd.edu, bhatele@cs.umd.edu",
     classifiers=["Development Status :: 2 - Pre-Alpha"],
     keywords="deep learning, distributed computing, parallel computing",
-    packages=find_packages(),
+    packages=find_packages(), 
+    install_requires = [
+        "torch == 1.8.0",
+        "mpi4py"
+    ]
 )
