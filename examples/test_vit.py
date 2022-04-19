@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 def test_vit_mnist():
     bs_per_gpu = 64
-    num_gpus = 2
+    num_gpus = 6
     bs = num_gpus * bs_per_gpu
     mbs = bs_per_gpu
     epochs = 10
@@ -24,7 +24,7 @@ def test_vit_mnist():
 
     ax.init(
         G_data=2,
-        G_inter=1,
+        G_inter=3,
         mixed_precision=True,
         fp16_allreduce=True,
         cpu_offload=cpu_offload,
