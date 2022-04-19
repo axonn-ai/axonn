@@ -19,7 +19,7 @@ setup(
     keywords="deep learning, distributed computing, parallel computing",
     packages=find_packages(), 
     install_requires = [
-        "torch == 1.8.0",
+        "torch",
         "mpi4py"
     ]
 )
