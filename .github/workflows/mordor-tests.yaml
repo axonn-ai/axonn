@@ -12,11 +12,11 @@ jobs:
 
     strategy:
       matrix:
-        ginter: [1, 2]
-        
+        ginter: [ 1, 2 ]
+        memopt: [ '--cpu-offload', '' ] 
     steps:
     - uses: actions/checkout@v3
     - name: Train MNIST
       run: |
         pwd
-        echo "training with ${{ matrix.ginter }}" 
+        echo "training with ${{ matrix.ginter }} ${{ matrix.memopt  }}" 
