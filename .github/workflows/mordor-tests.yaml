@@ -1,0 +1,22 @@
+name: mordor tests
+
+on:
+  push:
+    branches: [ develop, release-0.0.1 ]
+  pull_request:
+    branches: [ develop ]
+
+jobs:
+  mnist-trainer:
+    runs-on: [ mordor ]
+
+    strategy:
+      matrix:
+        ginter: [1, 2]
+        
+    steps:
+    - uses: actions/checkout@v3
+    - name: Train MNIST
+      run: |
+        pwd
+        echo "training with ${matrix.ginter}" 
