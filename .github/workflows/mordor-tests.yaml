@@ -19,9 +19,11 @@ jobs:
     - name: install AxoNN
       run: |
         pip install -e .
-        pip show axonn
+        pip install -r requirements.txt
     - name: Train MNIST
       run: |
         pwd
         G_inter=${{ matrix.ginter }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
+    - name: uninstall AxoNN
+        pip uninstall axonn
