@@ -16,6 +16,9 @@ jobs:
         memopt: [ '--cpu-offload', '' ] 
     steps:
     - uses: actions/checkout@v3
+    - uses: install AxoNN
+        pip install -e .
+        pip show axonn
     - name: Train MNIST
       run: |
         pwd
