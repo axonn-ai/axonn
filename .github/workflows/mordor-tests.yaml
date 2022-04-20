@@ -26,4 +26,5 @@ jobs:
         G_inter=${{ matrix.ginter }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
     - name: uninstall AxoNN
+      run: |
         pip uninstall axonn
