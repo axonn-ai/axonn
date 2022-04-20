@@ -19,4 +19,5 @@ jobs:
     - name: Train MNIST
       run: |
         pwd
-        echo "training with ${{ matrix.ginter }} ${{ matrix.memopt  }}" 
+        G_inter = ${{ matrix.ginter }}
+        echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
