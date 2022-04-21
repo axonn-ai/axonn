@@ -12,12 +12,14 @@ from tqdm import tqdm
 import pytest
 import os
 
+
 @pytest.mark.mpi
 def test_vit_mnist():
     from axonn import axonn as ax
     from axonn import optim
+
     G_inter = int(os.environ.get("G_inter"))
-    assert 6 % G_inter == 0 
+    assert 6 % G_inter == 0
     G_data = int(os.environ.get("G_data"))
     bs = int(os.environ.get("batch_size", 64))
     mbs = int(os.environ.get("micro_batch_size", 16))
@@ -64,13 +66,10 @@ def test_vit_mnist():
         root="./examples/dataset/", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
-    previous_model_state_memory = None 
+    previous_model_state_memory = None
     for epoch_number in range(epochs):
         epoch_loss = 0
-        for x, y in tqdm(
-            train_loader,
-            disable=True
-        ):
+        for x, y in tqdm(train_loader, disable=True):
             optimizer.zero_grad()
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
@@ -84,13 +83,17 @@ def test_vit_mnist():
             optimizer.step()
             epoch_loss += batch_loss
             current_model_state_memory = torch.cuda.memory_allocated()
-            assert (not previous_model_state_memory) or (current_model_state_memory == previous_model_state_memory), "model state memory should stay the same throughout training"
+            assert (not previous_model_state_memory) or (
+                current_model_state_memory == previous_model_state_memory
+            ), "model state memory should stay the same throughout training"
         if ilp_rank == G_inter - 1:
             ax.print_status(
-                    f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)} : model state memory = {torch.cuda.memory_allocated()/2**30} GB"
+                f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
+                f": model state memory = {torch.cuda.memory_allocated()/2**30} GB"
             )
-        
-    assert epoch_loss/len(train_loader) < 0.1, "model did not converge"
+
+    assert epoch_loss / len(train_loader) < 0.1, "model did not converge"
+
 
 if __name__ == "__main__":
     test_vit_mnist()

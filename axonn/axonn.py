@@ -365,6 +365,7 @@ def _initialize_mixed_precision_with_cpu_offload(
 
     return model, optimizer
 
+
 @torch.no_grad()
 def register_model_and_optimizer(model_shard, optimizer):
     """AxoNN's user facing function to register a model shard and
