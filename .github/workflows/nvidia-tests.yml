@@ -1,4 +1,4 @@
-name: mordor tests
+name: nvidia tests
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   mnist-trainer:
-    runs-on: [ mordor ]
+    runs-on: [ nvidia ]
 
     strategy:
       matrix:
@@ -24,12 +24,11 @@ jobs:
         python -c "import torchvision; torchvision.datasets.MNIST(root=\"./examples/dataset\", download=True, train=True)"
     - name: Train 
       run: |
-        pwd
         export G_inter=${{ matrix.ginter }}
         export G_data=$(( 2 / G_inter ))
         export memopt=${{ matrix.memopt }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-        mpirun -n 2 pytest --with-mpi examples/test_vit.py
+        mpirun -n 2 pytest --with-mpi tests/test_vit.py
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn

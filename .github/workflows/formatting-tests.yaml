@@ -1,4 +1,4 @@
-name: code-format tests
+name: formatting tests
 
 on:
   push:
@@ -14,14 +14,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.6", "3.7", "3.8", "3.9", "3.10"]
+       
 
     steps:
     - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.9
       uses: actions/setup-python@v2
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: 3.9
 
     - name: Install dependencies
       run: |
@@ -29,12 +29,10 @@ jobs:
         pip install flake8 pytest
 
     - name: Update black
-      if: ${{ matrix.python-version == 3.9 }}
       run: |
         pip install --upgrade black
 
     - name: Lint and Format Check with flake8 and black
-      if: ${{ matrix.python-version == 3.9 }}
       run: |
         black --diff --check .
         flake8
