@@ -1,4 +1,4 @@
-name: nvidia tests
+name: nvidia-rtx-3090 tests
 
 on:
   push:
