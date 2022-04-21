@@ -2,7 +2,7 @@ name: mordor tests
 
 on:
   push:
-    branches: [ develop, release-0.0.1 ]
+    branches: [ develop ]
   pull_request:
     branches: [ develop ]
 
