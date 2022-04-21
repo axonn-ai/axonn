@@ -16,15 +16,16 @@ jobs:
         memopt: [ '--cpu-offload', '' ] 
     steps:
     - uses: actions/checkout@v3
-    - name: install AxoNN
+    - name: Install AxoNN
       run: |
-        pip install -e .
         pip install -r requirements.txt
-    - name: Train MNIST
+    - name: Download dataset
+        python -c "import torchvision; torchvision.datasets.MNIST(root=\"./examples/dataset\", download=True, train=True)"
+    - name: Train 
       run: |
         pwd
         G_inter=${{ matrix.ginter }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-    - name: uninstall AxoNN
+    - name: Uninstall AxoNN
       run: |
-        pip uninstall  --yes axonn
+        pip uninstall --yes axonn

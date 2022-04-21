@@ -4,27 +4,30 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 
-from axonn import axonn as ax
-from axonn import optim
 import torchvision
 from external.models.vit import DistributedViT
 from torchvision.transforms import ToTensor
 import torch
 from tqdm import tqdm
+import pytest
+import os
 
-
+@pytest.mark.mpi
 def test_vit_mnist():
-    bs_per_gpu = 64
-    num_gpus = 2
-    bs = num_gpus * bs_per_gpu
-    mbs = bs_per_gpu
-    epochs = 10
+    from axonn import axonn as ax
+    from axonn import optim
+    G_inter = int(os.environ.get("G_inter"))
+    assert 6 % G_inter == 0 
+    G_data = int(os.environ.get("G_data"))
+    bs = int(os.environ.get("batch_size", 64))
+    mbs = int(os.environ.get("micro_batch_size", 16))
+    epochs = int(os.environ.get("epochs", 10))
     cpu_offload = True
     N, D, H = 6, 128, 8
 
     ax.init(
-        G_data=1,
-        G_inter=2,
+        G_data=G_data,
+        G_inter=G_inter,
         mixed_precision=True,
         fp16_allreduce=True,
         cpu_offload=cpu_offload,
@@ -66,7 +69,7 @@ def test_vit_mnist():
         epoch_loss = 0
         for x, y in tqdm(
             train_loader,
-            disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
+            disable=True
         ):
             optimizer.zero_grad()
             if ilp_rank == 0:
@@ -82,8 +85,10 @@ def test_vit_mnist():
             epoch_loss += batch_loss
         if ilp_rank == G_inter - 1:
             ax.print_status(
-                f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
+                    f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)} : memory = {torch.cuda.memory_allocated()/2**30} GB"
             )
+        
+    assert epoch_loss/len(train_loader) < 0.05
 
-
-test_vit_mnist()
+if __name__ == "__main__":
+    test_vit_mnist()
