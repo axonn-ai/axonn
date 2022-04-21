@@ -22,7 +22,7 @@ def test_vit_mnist():
     bs = int(os.environ.get("batch_size", 64))
     mbs = int(os.environ.get("micro_batch_size", 16))
     epochs = int(os.environ.get("epochs", 10))
-    cpu_offload = True
+    cpu_offload = bool(os.environ.get("memopt"))
     N, D, H = 6, 128, 8
 
     ax.init(
@@ -55,7 +55,7 @@ def test_vit_mnist():
     if cpu_offload:
         optimizer = optim.CPUAdam(model.parameters(), lr=0.001)
     else:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     ax.register_model_and_optimizer(model, optimizer)
 
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
@@ -64,7 +64,7 @@ def test_vit_mnist():
         root="./examples/dataset/", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
-
+    previous_model_state_memory = None 
     for epoch_number in range(epochs):
         epoch_loss = 0
         for x, y in tqdm(
@@ -83,12 +83,14 @@ def test_vit_mnist():
             batch_loss = ax.run_batch(x, y, eval_mode=False)
             optimizer.step()
             epoch_loss += batch_loss
+            current_model_state_memory = torch.cuda.memory_allocated()
+            assert (not previous_model_state_memory) or (current_model_state_memory == previous_model_state_memory), "model state memory should stay the same throughout training"
         if ilp_rank == G_inter - 1:
             ax.print_status(
-                    f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)} : memory = {torch.cuda.memory_allocated()/2**30} GB"
+                    f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)} : model state memory = {torch.cuda.memory_allocated()/2**30} GB"
             )
         
-    assert epoch_loss/len(train_loader) < 0.05
+    assert epoch_loss/len(train_loader) < 0.1, "model did not converge"
 
 if __name__ == "__main__":
     test_vit_mnist()
