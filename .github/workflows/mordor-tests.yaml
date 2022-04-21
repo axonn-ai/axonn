@@ -20,6 +20,7 @@ jobs:
       run: |
         pip install -r requirements.txt
     - name: Download dataset
+      run: |
         python -c "import torchvision; torchvision.datasets.MNIST(root=\"./examples/dataset\", download=True, train=True)"
     - name: Train 
       run: |
