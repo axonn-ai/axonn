@@ -63,7 +63,7 @@ def test_vit_mnist():
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
-        root="./examples/dataset/", train=True, transform=ToTensor()
+        root="./", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
     previous_model_state_memory = None

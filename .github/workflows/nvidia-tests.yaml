@@ -21,14 +21,14 @@ jobs:
         pip install -r requirements.txt
     - name: Download dataset
       run: |
-        python -c "import torchvision; torchvision.datasets.MNIST(root=\"./examples/dataset\", download=True, train=True)"
+        python -c "import torchvision; torchvision.datasets.MNIST(root=\"./axonn/tests\", download=True, train=True)"
     - name: Train 
       run: |
         export G_inter=${{ matrix.ginter }}
         export G_data=$(( 2 / G_inter ))
         export memopt=${{ matrix.memopt }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-        mpirun -n 2 pytest --with-mpi tests/test_vit.py
+        mpirun -n 2 pytest --with-mpi 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
