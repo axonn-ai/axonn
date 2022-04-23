@@ -4,27 +4,32 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 
-from axonn import axonn as ax
-from axonn import optim
 import torchvision
 from external.models.vit import DistributedViT
 from torchvision.transforms import ToTensor
 import torch
 from tqdm import tqdm
+import pytest
+import os
 
 
+@pytest.mark.mpi
 def test_vit_mnist():
-    bs_per_gpu = 64
-    num_gpus = 6
-    bs = num_gpus * bs_per_gpu
-    mbs = bs_per_gpu
-    epochs = 10
-    cpu_offload = True
-    N, D, H = 12, 768, 12
+    from axonn import axonn as ax
+    from axonn import optim
+
+    G_inter = int(os.environ.get("G_inter"))
+    assert 6 % G_inter == 0
+    G_data = int(os.environ.get("G_data"))
+    bs = int(os.environ.get("batch_size", 64))
+    mbs = int(os.environ.get("micro_batch_size", 16))
+    epochs = int(os.environ.get("epochs", 10))
+    cpu_offload = bool(os.environ.get("memopt"))
+    N, D, H = 6, 128, 8
 
     ax.init(
-        G_data=2,
-        G_inter=3,
+        G_data=G_data,
+        G_inter=G_inter,
         mixed_precision=True,
         fp16_allreduce=True,
         cpu_offload=cpu_offload,
@@ -52,22 +57,19 @@ def test_vit_mnist():
     if cpu_offload:
         optimizer = optim.CPUAdam(model.parameters(), lr=0.001)
     else:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     ax.register_model_and_optimizer(model, optimizer)
 
     ax.register_loss_fn(torch.nn.CrossEntropyLoss())
 
     train_dataset = torchvision.datasets.MNIST(
-        root="./examples/dataset/", train=True, transform=ToTensor()
+        root="./axonn/tests", train=True, transform=ToTensor()
     )
     train_loader = ax.create_dataloader(train_dataset, bs, mbs, 0)
-
+    previous_model_state_memory = None
     for epoch_number in range(epochs):
         epoch_loss = 0
-        for x, y in tqdm(
-            train_loader,
-            disable=not (ilp_rank == 0 and ax.config.data_parallel_rank == 0),
-        ):
+        for x, y in tqdm(train_loader, disable=True):
             optimizer.zero_grad()
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
@@ -80,10 +82,18 @@ def test_vit_mnist():
             batch_loss = ax.run_batch(x, y, eval_mode=False)
             optimizer.step()
             epoch_loss += batch_loss
+            current_model_state_memory = torch.cuda.memory_allocated()
+            assert (not previous_model_state_memory) or (
+                current_model_state_memory == previous_model_state_memory
+            ), "model state memory should stay the same throughout training"
         if ilp_rank == G_inter - 1:
             ax.print_status(
                 f"Epoch {epoch_number+1} : epoch loss {epoch_loss/len(train_loader)}"
+                f": model state memory = {torch.cuda.memory_allocated()/2**30} GB"
             )
 
+    assert epoch_loss / len(train_loader) < 0.1, "model did not converge"
 
-test_vit_mnist()
+
+if __name__ == "__main__":
+    test_vit_mnist()

@@ -3,7 +3,14 @@
 [![Build Status](https://github.com/hpcgroup/axonn/actions/workflows/unit-tests.yaml/badge.svg)](https://github.com/hpcgroup/axonn/actions)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A parallel framework for training deep neural networks.
+AxoNN is a parallel framework for training deep neural networks. 
+
+### Installation 
+Prior to the installation, [PyTorch](https://pytorch.org/get-started/locally/) must already be installed.  
+
+```bash
+pip install axonn
+```
 
 ### Contributing
 

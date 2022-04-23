@@ -1,3 +1,8 @@
+# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch
 from torch.optim.optimizer import Optimizer
 from . import axonn as ax
@@ -15,7 +20,7 @@ class CPUAdam(Optimizer):
         lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-8,
-        weight_decay=1e-2,
+        weight_decay=0,
         bucket_size=16000000,
         coalescing_factor=4,
     ):

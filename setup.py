@@ -8,7 +8,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="axonn",
-    version="0.0.1",
+    version="0.1.0",
     description="A parallel library for extreme-scale deep learning",
     long_description="""An asynchronous, message-driven parallel framework for
         extreme-scale deep learning""",
@@ -18,4 +18,5 @@ setup(
     classifiers=["Development Status :: 2 - Pre-Alpha"],
     keywords="deep learning, distributed computing, parallel computing",
     packages=find_packages(),
+    install_requires=["torch", "mpi4py"],
 )

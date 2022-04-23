@@ -1,0 +1,34 @@
+name: nvidia-rtx-3090 tests
+
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ develop ]
+
+jobs:
+  mnist-trainer:
+    runs-on: [ nvidia ]
+
+    strategy:
+      matrix:
+        ginter: [ 1, 2 ]
+        memopt: [ '0', '1' ] 
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install AxoNN
+      run: |
+        pip install -r requirements.txt
+    - name: Download dataset
+      run: |
+        python -c "import torchvision; torchvision.datasets.MNIST(root=\"./axonn/tests\", download=True, train=True)"
+    - name: Train 
+      run: |
+        export G_inter=${{ matrix.ginter }}
+        export G_data=$(( 2 / G_inter ))
+        export memopt=${{ matrix.memopt }}
+        echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
+        mpirun -n 2 pytest --with-mpi 
+    - name: Uninstall AxoNN
+      run: |
+        pip uninstall --yes axonn
