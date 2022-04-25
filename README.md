@@ -1,7 +1,7 @@
 # AxoNN
 
-[![formatting tests](https://github.com/hpcgroup/axonn/actions/workflows/formatting-tests.yaml/badge.svg)](https://github.com/hpcgroup/axonn/actions/workflows/formatting-tests.yaml)
-[![Build Status](https://github.com/hpcgroup/axonn/actions/workflows/unit-tests.yaml/badge.svg)](https://github.com/hpcgroup/axonn/actions)
+[![rtx-3090 tests](https://github.com/hpcgroup/axonn/actions/workflows/nvidia-tests.yaml/badge.svg)](https://github.com/hpcgroup/axonn/actions/workflows/nvidia-tests.yaml)
+[![docs](https://readthedocs.org/projects/axonn/badge/?version=latest)](https://axonn.readthedocs.io/en/latest/?badge=latest)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 AxoNN is a parallel framework for training deep neural networks. 
