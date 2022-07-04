@@ -779,8 +779,8 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 while len(transit_tensors) == G_inter:
                     _clear_transit_tensors()
                 _forward_pass(
-                        _get_subtensor(batch, next_microbatch), next_microbatch, eval_mode
-                    )
+                    _get_subtensor(batch, next_microbatch), next_microbatch, eval_mode
+                )
                 next_microbatch += 1
                 remaining_microbatches -= 1
 
