@@ -14,7 +14,7 @@ class communication_handle:
     communication(NCCL) of GPU tensors.
     """
 
-    def __init__(self, G_inter: int, G_data: int, gpus_per_node: int = None):
+    def __init__(self, G_inter: int, G_data: int, gpus_per_node: int = None, G_intra=1):
         """Constructor for the communication handle
 
         Arguments:
@@ -22,13 +22,17 @@ class communication_handle:
             G_data (int): number of GPUs used for data parallelism
             gpus_per_node (int, optional): number of GPUs per node, if not
             provided this is inferred using pytorch
+            G_intra (int): degree of intra-layer parallelism. Note that the user is supposed
+            to implement their intra-layer parallel kernels. AxoNN will just create communication
+            groups for intra-layer parallelism
         """
 
         self.world_rank = MPI.COMM_WORLD.Get_rank()
         self.world_size = MPI.COMM_WORLD.Get_size()
         assert (
-            G_inter * G_data == self.world_size
+            G_inter * G_data * G_intra == self.world_size
         ), "The product of G_inter and G_data should be equal to the number of GPUs"
+        self.G_intra = G_intra
         self.G_inter = G_inter
         self.G_data = G_data
 
@@ -38,12 +42,15 @@ class communication_handle:
         )
         self.local_rank = self.world_rank % self.gpus_per_node
         torch.cuda.set_device(self.local_rank)
-        self.data_parallel_rank = self.world_rank // G_inter
-        self.inter_layer_parallel_rank = self.world_rank % G_inter
+        self.intra_layer_parallel_rank = self.world_rank % G_intra
+        self.inter_layer_parallel_rank = (self.world_rank // G_intra) % G_inter
+        self.data_parallel_rank = self.world_rank // (G_inter * G_intra)
+        # print(f"world_rank {self.world_rank} | {self.intra_layer_parallel_rank}, {self.inter_layer_parallel_rank}, {self.data_parallel_rank}")
 
         # create communicator for point-to-point(MPI) communication
-        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(self.data_parallel_rank)
-
+        colour = self.intra_layer_parallel_rank +  G_intra * self.data_parallel_rank
+        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
+        assert self.p2p_mpi_comm.Get_size() == G_inter
         # create communicator for collective (NCCL) communication
         if not torch.distributed.is_initialized():
             init_method = "tcp://"
@@ -57,17 +64,40 @@ class communication_handle:
                 init_method=init_method,
             )
 
-        for i in range(self.G_inter):
+        if self.world_rank == 0:
+            print("Creating data parallel groups")
+        for i in range(G_inter):
+            for j in range(G_intra):
             # all ranks have to form all data parallel communicators and not
             # just their own
-            ranks_in_ith_data_parallel_group = [
-                j * self.G_inter + i for j in range(self.G_data)
-            ]
-            ith_data_parallel_group = torch.distributed.new_group(
-                ranks=ranks_in_ith_data_parallel_group, backend="nccl"
-            )
-            if self.inter_layer_parallel_rank == i:
-                self.coll_nccl_comm = ith_data_parallel_group
+                ranks_in_ith_jth_data_parallel_group = [
+                    k * self.G_inter * self.G_intra + i*G_intra + j for k in range(self.G_data)
+                ]
+                if self.world_rank == 0:
+                    print(ranks_in_ith_jth_data_parallel_group)
+                ith_jth_data_parallel_group = torch.distributed.new_group(
+                    ranks=ranks_in_ith_jth_data_parallel_group, backend="nccl"
+                )
+                if self.world_rank in ranks_in_ith_jth_data_parallel_group:
+                    self.coll_nccl_comm = ith_jth_data_parallel_group
+
+        if self.world_rank == 0:
+            print("Creating intra-layer parallel groups")
+        # create communicators for intra-layer parallelism
+        for i in range(G_data):
+            for j in range(G_inter):
+                ranks_in_ith_jth_intra_layer_group = [
+                    i*G_inter*G_intra + j*G_intra + k for k in range(G_intra)
+                ]
+
+                ith_jth_intra_layer_group = torch.distributed.new_group(
+                    ranks=ranks_in_ith_jth_intra_layer_group, backend="nccl"
+                )
+                if self.world_rank in ranks_in_ith_jth_intra_layer_group:
+                    self.intra_layer_group = ith_jth_intra_layer_group
+                if self.world_rank == 0:
+                    print(ranks_in_ith_jth_intra_layer_group)
+        
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its
@@ -152,3 +182,12 @@ class communication_handle:
     def broadcast_inter_layer(self, tensor, root):
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         self.p2p_mpi_comm.Bcast(mpi4py_compatible_array, root=root)
+
+    def get_tensor_model_parallel_rank(self):
+        return self.intra_layer_parallel_rank
+    
+    def get_tensor_model_parallel_world_size(self):
+        return self.G_intra
+
+    def get_tensor_model_parallel_group(self):
+        return self.intra_layer_group
