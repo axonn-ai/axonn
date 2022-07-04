@@ -742,7 +742,6 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 )
                 next_microbatch += 1
                 remaining_microbatches -= 1
-
         _post_recv_requests(
             post_fw_recv=(forward_msgs > 1), post_bw_recv=(backward_msgs > 1)
         )
@@ -773,6 +772,17 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 batch_loss += microbatch_loss.item()
                 if not eval_mode:
                     _backward_pass(None, microbatch_no)
+
+        if eval_mode and ilp_rank == 0:
+            global transit_tensors
+            while remaining_microbatches:
+                while len(transit_tensors) == G_inter:
+                    _clear_transit_tensors()
+                _forward_pass(
+                    _get_subtensor(batch, next_microbatch), next_microbatch, eval_mode
+                )
+                next_microbatch += 1
+                remaining_microbatches -= 1
 
         _clear_transit_tensors(clear_all=True)
     if not _cpu_offload:
