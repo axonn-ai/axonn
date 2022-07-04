@@ -95,7 +95,7 @@ class empty_dataset(torch.utils.data.Dataset):
 def init(
     G_inter: int,
     G_data: int,
-    G_intra: int=1,
+    G_intra: int = 1,
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
     fp16_allreduce=True,
@@ -110,7 +110,7 @@ def init(
         G_data (int): number of GPUs used for data parallelism
         G_intra (int): number of GPUs for intra-layer parallelism, note
         that the user has to implement intra-layer kernels themselves.
-        AxoNN just creates the required process groups. 
+        AxoNN just creates the required process groups.
         gpus_per_node (int, optional):  number of GPUs per node, if not
             provided this is inferred using pytorch
         mixed_precision (bool): whether to use mixed precision
@@ -141,9 +141,11 @@ def init(
     if comm_handle.world_rank == 0:
         print(f"Running with G_data={config.G_data} X G_inter={config.G_inter}")
 
+
 def get_comm_handle():
     global comm_handle
     return comm_handle
+
 
 def create_dataloader(
     dataset: torch.utils.data.Dataset,
