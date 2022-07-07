@@ -123,7 +123,7 @@ def init(
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
-    comm_handle = communication_handle(G_inter, G_data, gpus_per_node, G_intra)
+    comm_handle = communication_handle(G_inter, G_data, G_intra, gpus_per_node)
     config.G_inter = G_inter
     config.G_data = G_data
     config.G_intra = G_intra
@@ -139,7 +139,7 @@ def init(
     _fp16_all_reduce = fp16_allreduce
     _cpu_offload = cpu_offload
     if comm_handle.world_rank == 0:
-        print(f"Running with G_data={config.G_data} X G_inter={config.G_inter}")
+        print(f"Running with G_data={config.G_data} X G_inter={config.G_inter} X G_intra={config.G_intra}")
 
 
 def get_comm_handle():
@@ -648,7 +648,6 @@ def _backward_pass(output_gradients, microbatch_no):
         output gradients (torch.Tensor): the gradient of the loss wrt the output tensor
         microbatch_no (int): the microbatch number
     """
-
     output_tensors_cache[microbatch_no].backward(output_gradients)
     input_tensor = input_tensors_cache[microbatch_no]
     del output_tensors_cache[microbatch_no]

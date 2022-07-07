@@ -14,7 +14,7 @@ class communication_handle:
     communication(NCCL) of GPU tensors.
     """
 
-    def __init__(self, G_inter: int, G_data: int, gpus_per_node: int = None, G_intra=1):
+    def __init__(self, G_inter: int, G_data: int, G_intra=1, gpus_per_node=None):
         """Constructor for the communication handle
 
         Arguments:
@@ -27,7 +27,7 @@ class communication_handle:
             kernels. AxoNN will just create communicationgroups for
             intra-layer parallelism
         """
-
+        print(G_intra, G_inter, G_data)
         self.world_rank = MPI.COMM_WORLD.Get_rank()
         self.world_size = MPI.COMM_WORLD.Get_size()
         assert (
