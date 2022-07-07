@@ -139,7 +139,10 @@ def init(
     _fp16_all_reduce = fp16_allreduce
     _cpu_offload = cpu_offload
     if comm_handle.world_rank == 0:
-        print(f"Running with G_data={config.G_data} X G_inter={config.G_inter} X G_intra={config.G_intra}")
+        print(
+            f"Running with G_data={config.G_data} X G_inter={config.G_inter}"
+            "X G_intra={config.G_intra}"
+        )
 
 
 def get_comm_handle():
