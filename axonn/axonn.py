@@ -150,8 +150,10 @@ def get_comm_handle():
     global comm_handle
     return comm_handle
 
+
 def is_zeroth_rank():
     return comm_handle.world_rank == 0
+
 
 def create_dataloader(
     dataset: torch.utils.data.Dataset,
@@ -687,7 +689,9 @@ def _sync_scale(local_overflow):
     return global_overflow
 
 
-def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False, post_bw_hook=None) -> int:
+def run_batch(
+    batch: torch.Tensor, labels: torch.Tensor, eval_mode=False, post_bw_hook=None
+) -> int:
     """Perform forward and backward pass on a batch. This function invokes
     inter-layer-parallelism followed by an all-reduce.
 
