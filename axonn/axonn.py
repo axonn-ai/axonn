@@ -129,6 +129,7 @@ def init(
     config.G_intra = G_intra
     config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
     config.data_parallel_rank = comm_handle.data_parallel_rank
+    config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
     is_initialized = True
     # assert mixed_precision, "Only supports mixed precision at apex O2 level"
     # assert fp16_allreduce, "Only supports fp-16 allreduce"
@@ -148,6 +149,10 @@ def init(
 def get_comm_handle():
     global comm_handle
     return comm_handle
+
+
+def is_zeroth_rank():
+    return comm_handle.world_rank == 0
 
 
 def create_dataloader(
@@ -684,7 +689,9 @@ def _sync_scale(local_overflow):
     return global_overflow
 
 
-def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int:
+def run_batch(
+    batch: torch.Tensor, labels: torch.Tensor, eval_mode=False, post_bw_hook=None
+) -> int:
     """Perform forward and backward pass on a batch. This function invokes
     inter-layer-parallelism followed by an all-reduce.
 
@@ -797,6 +804,9 @@ def run_batch(batch: torch.Tensor, labels: torch.Tensor, eval_mode=False) -> int
                 remaining_microbatches -= 1
 
         _clear_transit_tensors(clear_all=True)
+    if post_bw_hook is not None:
+        assert not eval_mode
+        post_bw_hook(model)
     if not _cpu_offload:
         _allreduce_and_descale()
     return batch_loss / num_microbatches_per_network
