@@ -14,6 +14,7 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from enum import Enum
 import numpy as np
 import types
+import time
 
 # True when init has been called
 is_initialized = False
@@ -51,7 +52,14 @@ scaling_window = 200
 no_overflow_iters = 0
 
 _cpu_offload = False
-
+_profile=False
+fw_bw_start = torch.cuda.Event(enable_timing=True)
+fw_bw_time=0
+fw_bw_end = torch.cuda.Event(enable_timing=True)
+p2p_time=0
+collective_time=0
+hook_time=0
+bubble_time=0
 
 class Operation(Enum):
     """
@@ -100,6 +108,7 @@ def init(
     mixed_precision=False,
     fp16_allreduce=True,
     cpu_offload=False,
+    profile=False
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -119,10 +128,10 @@ def init(
         cpu_offload (bool): offload optimizer states and fp32 parameters to
         the cpu to save gpu memory. Currently only works with
         mixed_precision, fp16_allreduce and axonn.optim.CPUAdam optimizer.
-
+        profile (bool): whether to profile axonn
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
-    global _cpu_offload
+    global _cpu_offload, _profile
     comm_handle = communication_handle(G_inter, G_data, G_intra, gpus_per_node)
     config.G_inter = G_inter
     config.G_data = G_data
@@ -139,6 +148,7 @@ def init(
         computation_dtype = torch.float32
     _fp16_all_reduce = fp16_allreduce
     _cpu_offload = cpu_offload
+    _profile = profile
     if comm_handle.world_rank == 0:
         print(
             f"Running with G_data={config.G_data} X G_inter={config.G_inter}"
@@ -519,13 +529,18 @@ def _send(tensor: torch.Tensor, destination: int, tag: int):
         destination (int): inter-layer-parallel rank of the destination
         tag (int): tag of the message
     """
+    global p2p_time
     if (destination < 0) or (destination >= config.G_inter):
         return
     _clear_transit_tensors()
+    if _profile:
+        p2p_start = time.time()
     tensor = tensor.contiguous()
     torch.cuda.synchronize()
     transit_tensors.append([comm_handle.send(tensor, destination, tag), tensor])
-
+    if _profile:
+        p2p_end = time.time()
+        p2p_time += p2p_end - p2p_start
 
 def _fill_shape(shape):
     return [config.micro_batch_size if x == -1 else x for x in shape]
@@ -587,6 +602,9 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
+    global p2p_time, bubble_time
+    if _profile:
+        p2p_start = time.time()
     status = MPI.Status()
     if (requests["bw"] is None) and (requests["fw"] is not None):
         requests["fw"][1].Wait(status)
@@ -595,6 +613,8 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
         requests["fw"] = None
         if post_fw_recv:
             _post_fw_recv_requests()
+        if _profile:
+            p2p_end = time.time()
         _forward_pass(input_activation, tag, eval_mode)
         op = Operation.FW
     elif (requests["fw"] is None) and (requests["bw"] is not None):
@@ -604,6 +624,8 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
         requests["bw"] = None
         if post_bw_recv:
             _post_bw_recv_requests()
+        if _profile:
+            p2p_end = time.time()
         _backward_pass(output_gradients, tag)
         op = Operation.BW
     else:
@@ -614,6 +636,8 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
             requests["fw"] = None
             if post_fw_recv:
                 _post_fw_recv_requests()
+            if _profile:
+                p2p_end = time.time()
             _forward_pass(input_activation, tag, eval_mode)
             op = Operation.FW
         else:
@@ -621,8 +645,15 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
             requests["bw"] = None
             if post_bw_recv:
                 _post_bw_recv_requests()
+            if _profile:
+                p2p_end = time.time()
             _backward_pass(output_gradients, tag)
             op = Operation.BW
+    if _profile:
+        if bubble_time==0 and config.inter_layer_parallel_rank==0:
+            bubble_time = p2p_end - p2p_start
+        else:
+            p2p_time += p2p_end - p2p_start
     return tag, op
 
 
@@ -688,6 +719,17 @@ def _sync_scale(local_overflow):
         global_overflow = False
     return global_overflow
 
+def profiling_results():
+    global fw_bw_time, p2p_time, collective_time, hook_time, bubble_time
+    assert _profile
+    fw_bw_time = fw_bw_time - p2p_time
+    compute = fw_bw_time
+    p2p = p2p_time
+    coll = collective_time
+    hook = hook_time
+    bubble = bubble_time
+    p2p_time = collective_time = fw_bw_time = hook_time = bubble_time = 0
+    return compute, p2p, coll, hook, bubble
 
 def run_batch(
     batch: torch.Tensor, labels: torch.Tensor, eval_mode=False, post_bw_hook=None
@@ -706,6 +748,9 @@ def run_batch(
         loss (float): the loss on the batch for inter-layer-parallel-rank
         == G_inter - 1, else 0
     """
+    global fw_bw_time, hook_time, collective_time, p2p_time
+    if _profile:
+        fw_bw_start.record()
     batch_loss = 0
     ilp_rank, G_inter, G_data = (
         config.inter_layer_parallel_rank,
@@ -802,13 +847,34 @@ def run_batch(
                 )
                 next_microbatch += 1
                 remaining_microbatches -= 1
-
+        if _profile:
+            p2p_start = time.time()
         _clear_transit_tensors(clear_all=True)
+        if _profile:
+            p2p_end = time.time()
+            p2p_time += p2p_end - p2p_start
+    
+    if _profile:
+        fw_bw_end.record()
+        torch.cuda.synchronize()
+        fw_bw_time =  fw_bw_start.elapsed_time(fw_bw_end)/1000
+
     if post_bw_hook is not None:
         assert not eval_mode
+        if _profile:
+            hook_start = time.time()
         post_bw_hook(model)
+        if _profile:
+            torch.cuda.synchronize()
+            hook_end = time.time()
+            hook_time = hook_end - hook_start
     if not _cpu_offload:
+        if _profile:
+            coll_start = time.time()
         _allreduce_and_descale()
+        if _profile:
+            coll_end = time.time()
+            collective_time += coll_end - coll_start
     return batch_loss / num_microbatches_per_network
 
 
