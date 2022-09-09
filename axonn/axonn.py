@@ -249,6 +249,23 @@ def _coalesce_and_reassign(tensors: List[torch.Tensor]) -> torch.Tensor:
         old_tensor.data = new_tensor
     return flattened_tensor
 
+def _c_and_r_helper(flat_tensor, current_params, next_param):
+    flattened_tensor = _flatten_dense_tensors([flat_tensor, next_param])
+    for old_tensor, new_tensor in zip(
+        current_params + [next_param], _unflatten_dense_tensors(flattened_tensor, current_params + [next_param])
+    ):
+        old_tensor.data = new_tensor
+    return flattened_tensor
+
+def _coalesce_and_reassign_mem_eff(tensors):
+    if len(tensors) == 1:
+        return tensors[0]
+    flattened_tensor = tensors[0]
+    current_params = [tensors[0]]
+    for tensor in tensors[1:]:
+        flattened_tensor = _c_and_r_helper(flattened_tensor, current_params, tensor)
+        current_params.append(tensor)
+    return flattened_tensor
 
 def _initialize_mixed_precision(
     model: torch.nn.Module, optimizer: torch.optim.Optimizer
@@ -297,10 +314,10 @@ def _initialize_mixed_precision(
         optimizer.state_dict()
     )  # trick to recast optimizer states
 
-    model_params_fp32 = _coalesce_and_reassign(fp32_params)
-    model_params_fp16 = _coalesce_and_reassign(fp16_params)
-    model_grads_fp32 = _coalesce_and_reassign(fp32_grads)
-    model_grads_fp16 = _coalesce_and_reassign(fp16_grads)
+    model_params_fp32 = _coalesce_and_reassign_mem_eff(fp32_params)
+    model_params_fp16 = _coalesce_and_reassign_mem_eff(fp16_params)
+    model_grads_fp32 = _coalesce_and_reassign_mem_eff(fp32_grads)
+    model_grads_fp16 = _coalesce_and_reassign_mem_eff(fp16_grads)
 
     return model, optimizer
 

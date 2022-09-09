@@ -7,7 +7,97 @@ import torch
 from torch.optim.optimizer import Optimizer
 from . import axonn as ax
 import torch.optim._functional as F
+from collections import defaultdict
 
+
+class PruningAwareAdam(Optimizer):
+    """
+    AxoNN's implementation of Adam for pruned parameter groups
+    """
+
+    @torch.no_grad()
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+    ):
+        params_fp16 = []
+        grads_fp16 = []       
+        params_fp32 = []
+        grads_fp32 = []
+        masks = []
+        group_offsets = []
+        current_offset = 0
+        for group in params:
+            group_size = 0
+            for param in group["params"]:
+                group_size += param.numel()
+                params_fp16.append(param)
+                param.grad = torch.zeros_like(param)
+                grads_fp16.append(param.grad)
+                masks.append(param.mask)
+            group_offsets.append(current_offset)
+            current_offset += group_size
+        group_offsets.append(current_offset)
+
+        self.params_fp16 = ax._coalesce_and_reassign_mem_eff(params_fp16)
+        self.grads_fp16 = ax._coalesce_and_reassign_mem_eff(grads_fp16)
+        self.mask = ax._coalesce_and_reassign_mem_eff(masks)
+
+        assert self.params_fp16.numel() == self.mask.numel()
+        ax.print_status(f"Fraction = {self.mask.sum() / self.mask.numel()}")
+
+
+        new_groups = []
+        for i,group in enumerate(params):
+            st = group_offsets[i]
+            en = group_offsets[i+1]
+            group_params_fp16 = self.params_fp16[st:en]
+            group_mask = self.mask[st:en]
+            group_non_zeros = group_mask.sum().item()
+            group_params_fp32 = torch.masked_select(group_params_fp16,
+                    group_mask).float()
+            new_group = {}
+
+            for key, val in group.items():
+                if key!= 'params':
+                    new_group[key] = val
+                else:
+                    new_group["params"] = [group_params_fp32]
+
+            new_groups.append(new_group)
+
+        self.base_optimizer = torch.optim.AdamW(new_groups, lr, betas, eps,
+                weight_decay)
+        self.param_groups = new_groups
+        self.group_offsets = group_offsets
+
+    def step(self, closure=None):
+        assert closure is None, "PruningAwareOptimizer does not support closure"
+
+        for i, group in enumerate(self.param_groups):
+            st = self.group_offsets[i]
+            en = self.group_offsets[i+1]
+            grad_fp16 = self.grads_fp16[st:en]
+            param_fp32 = group["params"][0]
+            mask = self.mask[st:en]
+            param_fp32.grad = torch.masked_select(grad_fp16, mask).float()
+
+        self.base_optimizer.step()
+
+        for i, group in enumerate(self.param_groups):
+            group["params"][0].grad = None
+            st = self.group_offsets[i]
+            en = self.group_offsets[i+1]
+            param_fp16 = self.params_fp16[st:en]
+            mask = self.mask[st:en]
+            param_fp16[mask>0].copy_(group["params"][0])
+
+    def zero_grad(self):
+        self.grads_fp16.zero_()
 
 class CPUAdam(Optimizer):
     """
