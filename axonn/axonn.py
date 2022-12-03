@@ -141,8 +141,8 @@ def init(
     _cpu_offload = cpu_offload
     if comm_handle.world_rank == 0:
         print(
-            f"Running with G_data={config.G_data} X G_inter={config.G_inter}"
-            "X G_intra={config.G_intra}"
+            f"Running with G_data={config.G_data} X G_inter={config.G_inter}",
+            f"X G_intra={config.G_intra}",
         )
 
 
@@ -467,8 +467,8 @@ def print_status(*msg):
     """
 
     print(
-        f"DP Rank : {config.data_parallel_rank} |\
-ILP Rank : {config.inter_layer_parallel_rank} - ",
+        f"DP Rank : {config.data_parallel_rank} |",
+        f"ILP Rank : {config.inter_layer_parallel_rank} -",
         *msg,
     )
 
@@ -838,7 +838,7 @@ def _allreduce_and_descale():
     # for full precision we will have normal gradients
     with torch.no_grad():
         if computation_dtype == torch.float32:
-            comm_handle.all_reduce(model_grads_fp32, async_op=False)
+            comm_handle.allreduce(model_grads_fp32, async_op=False)
         else:
             if _fp16_all_reduce:
                 # first all reduce then descale to prevent underflow
