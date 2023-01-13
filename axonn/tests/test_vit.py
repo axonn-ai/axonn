@@ -24,7 +24,7 @@ def test_vit_mnist():
     bs = int(os.environ.get("batch_size", 64))
     mbs = int(os.environ.get("micro_batch_size", 16))
     epochs = int(os.environ.get("epochs", 10))
-    cpu_offload = bool(os.environ.get("memopt"))
+    cpu_offload = bool(int(os.environ.get("memopt")))
     N, D, H = 6, 128, 8
 
     ax.init(
