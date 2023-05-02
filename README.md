@@ -20,6 +20,11 @@ We have built the all the dependencies required for this tutorial in a shared py
 
 ## Basics of Model Training
 
+### Mixed Precision
+
+### Activation Checkpointing
+
+
 ## Data Parallelism
 
 ### Pytorch Distributed Data Parallel (DDP)
