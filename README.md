@@ -3,7 +3,7 @@
 Code material for the tutorial can be found in this repository. 
 
 ** Contents ** 
-# [Setup](#setup)
+* # [Setup](#setup)
 
 
 ## Setup 
