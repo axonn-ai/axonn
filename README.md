@@ -18,7 +18,7 @@ We have built the dependencies required for this tutorial in a shared python vir
 
 ```
 
-We have also put the training dataset i.e. [MNIST](http://yann.lecun.com/exdb/mnist/)  used in this tutorial in . /scratch/zt1/project/bhatele-lab/shared/MNIST
+We have also put the training dataset i.e. [MNIST](http://yann.lecun.com/exdb/mnist/)  used in this tutorial in `. /scratch/zt1/project/bhatele-lab/shared/MNIST`
 
 
 
