@@ -11,12 +11,16 @@ Code material for the tutorial can be found in this repository.
 
 ## Setup 
 
-We have built the all the dependencies required for this tutorial in a shared python virtual enviroment, which can be activated as follows:
+We have built the dependencies required for this tutorial in a shared python virtual enviroment, which can be activated as follows:
 
 ```bash
 . /scratch/zt1/project/bhatele-lab/shared/tutorial-venv/bin/activate
 
 ```
+
+We have also put the training dataset i.e. [MNIST](http://yann.lecun.com/exdb/mnist/)  used in this tutorial in . /scratch/zt1/project/bhatele-lab/shared/MNIST
+
+
 
 ## Basics of Model Training
 
