@@ -2,7 +2,7 @@
 
 Code material for the tutorial can be found in this repository. 
 
-** Contents ** 
+**Contents** 
 * [Setup](#setup)
 
 
