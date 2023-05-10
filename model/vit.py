@@ -111,10 +111,19 @@ class Transformer(nn.Module):
                 )
             )
 
-    def forward(self, x):
-        for attn, ff in self.layers:
-            x = attn(x) + x
-            x = ff(x) + x
+    def compute_single_layer(self, layer_idx, x):
+        attn, ff = self.layers[layer_idx]
+        x = attn(x) + x
+        x = ff(x) + x
+        return x 
+
+    def forward(self, x, checkpoint_activations=False):
+        if not checkpoint_activations:
+            for layer_idx in range(len(self.layers)):
+                x = self.compute_single_layer(layer_idx, x)
+        else:
+            for layer_idx in range(len(self.layers)):           
+                x = torch.utils.checkpoint.checkpoint(self.compute_single_layer, layer_idx, x)
         return x
 
 
@@ -174,10 +183,8 @@ class ViT(nn.Module):
             nn.LayerNorm(dim), nn.Linear(dim, num_classes)
         )
 
-        self.inter_layer_parallel_rank = inter_layer_parallel_rank
-        self.G_inter = G_inter
 
-    def forward(self, x):
+    def forward(self, x, checkpoint_activations=False):
         x = self.to_patch_embedding(x)
         b, n, _ = x.shape
         cls_tokens = repeat(self.cls_token, "() n d -> b n d", b=b)
@@ -185,7 +192,7 @@ class ViT(nn.Module):
         x += self.pos_embedding[:, : (n + 1)]
         x = self.dropout(x)
 
-        x = self.transformer(x)
+        x = self.transformer(x, checkpoint_activations=checkpoint_activations)
 
         x = x.mean(dim=1) if self.pool == "mean" else x[:, 0]
         x = self.to_latent(x)
