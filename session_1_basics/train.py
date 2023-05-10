@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from net.fc_net_sequential import FC_Net 
+from model.fc_net_sequential import FC_Net 
 from utils import print_memory_stats, num_params
 from args import create_parser
 
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         root=args.data_dir, train=True, transform=ToTensor()
     )
     train_loader = torch.utils.data.DataLoader(train_dataset, 
-            batch_size=args.batch_size, drop_last=True)
+            batch_size=args.batch_size, drop_last=True, num_workers=1)
 
 
     test_dataset = torchvision.datasets.MNIST(
