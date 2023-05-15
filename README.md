@@ -31,9 +31,22 @@ We have also put the training dataset i.e. [MNIST](http://yann.lecun.com/exdb/mn
 
 ## Data Parallelism
 
+```bash
+cd session_2_data_parallelism
+```
+
 ### Pytorch Distributed Data Parallel (DDP)
 
+```bash
+sbatch run_ddp.sh
+```
+
 ### Zero Redundancy Optimizer (ZeRO)
+
+
+```bash
+sbatch run_zero.sh
+```
 
 ## Tensor Parallelism
 
