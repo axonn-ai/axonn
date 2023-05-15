@@ -9,8 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from torch.cuda.amp import GradScaler
 
-
-from model.vit import ViT
+from model.fc_net_sequential import FC_Net
 from utils import print_memory_stats, num_params
 from args import create_parser
 
@@ -47,20 +46,7 @@ if __name__ == "__main__":
             batch_size=args.batch_size, drop_last=True)
     
     ## Step 2 - Create Neural Network 
-    net = ViT(
-                image_size=args.image_size,
-                channels=1,
-                patch_size=4,
-                num_classes=10,
-                dim=args.hidden_size,
-                depth=args.num_layers,
-                heads=16,
-                dim_head=args.hidden_size // 16,
-                mlp_dim=args.hidden_size * 4,
-                dropout=0.1,
-                emb_dropout=0.1,
-            ).cuda()
-
+    net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
     params = num_params(net) / 1e9 
     
     ## Step 3 - Create Optimizer and LR scheduler

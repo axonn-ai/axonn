@@ -8,10 +8,14 @@ class FC_Net(nn.Module):
         self.layers = nn.ModuleList([FC_Net_Layer(hidden_size) for _ in range(num_layers)])
         self.clf = nn.Linear(hidden_size, output_size)
 
-    def forward(self, x):
+    def forward(self, x, checkpoint_activations=False):
+        x = x.view(x.shape[0], -1)
         x = self.embed(x)
         for layer in self.layers:
-            x = layer(x)
+            if not checkpoint_activations:
+                x = layer(x)
+            else:
+                x = torch.utils.checkpoint.checkpoint(layer, x)
         x = self.clf(x)
         return x
 
