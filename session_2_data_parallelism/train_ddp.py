@@ -68,7 +68,7 @@ if __name__ == "__main__":
     )
 
     train_loader = torch.utils.data.DataLoader(train_dataset, 
-            batch_size=args.batch_size, drop_last=True, num_workers=1, sampler=train_sampler)
+            batch_size=args.batch_size // dist.get_world_size(), drop_last=True, num_workers=1, sampler=train_sampler)
 
 
     ## Step 3 - Create Neural Network 

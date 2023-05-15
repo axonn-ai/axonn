@@ -20,10 +20,9 @@ PRINT_EVERY=1
 if __name__ == "__main__":
     parser = create_parser()
     ## deepspeed requires us to add this arg
-    parser.add_argument('--local_rank', type=int, default=0)
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
-    
+
     ## Step 1 - Initialize Pytorch Distributed
     deepspeed.init_distributed()
     log_dist('initialized deepspeed', ranks=[0])
@@ -49,6 +48,10 @@ if __name__ == "__main__":
    
 
     ## Step 4 - Create model, optimizer, trainloader
+
+    ## needs to be set manually for some reason
+    args.local_rank = int(os.environ.get("LOCAL_RANK"))
+    
     model_engine, optimizer, train_loader, __ = deepspeed.initialize(
         args=args, model=net, optimizer=optimizer, training_data=train_dataset)
    

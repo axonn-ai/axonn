@@ -14,7 +14,7 @@ Code material for the tutorial can be found in this repository.
 We have built the dependencies required for this tutorial in a shared python virtual enviroment, which can be activated as follows:
 
 ```bash
-. /scratch/zt1/project/bhatele-lab/shared/tutorial-venv/bin/activate
+. /scratch/zt1/project/isc2023/shared/tutorial-venv/bin/activate
 
 ```
 
