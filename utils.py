@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 
 def print_memory_stats():
     curr_memory = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
@@ -11,3 +12,8 @@ def num_params(model):
     for param in model.parameters():
         params += param.numel()
     return params
+
+def log_dist(msg, ranks=[]):
+    assert dist.is_initialized()
+    if dist.get_rank() in ranks:
+        print(f"Rank {dist.get_rank()} : {msg}")
