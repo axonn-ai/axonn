@@ -36,14 +36,6 @@ if __name__ == "__main__":
 
     train_loader = torch.utils.data.DataLoader(train_dataset, 
             batch_size=args.batch_size, drop_last=True, num_workers=1)
-
-
-    test_dataset = torchvision.datasets.MNIST(
-        root=args.data_dir, train=False, transform=augmentations
-    )
-
-    test_loader = torch.utils.data.DataLoader(train_dataset, 
-            batch_size=args.batch_size, drop_last=True)
     
     ## Step 2 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
@@ -61,6 +53,7 @@ if __name__ == "__main__":
    
     print(f"Model Size = {params} B")
 
+    ## Scales the loss prior to the backward pass to prevent underflow of gradients
     scaler = GradScaler()
 
     for epoch in range(NUM_EPOCHS):
@@ -72,12 +65,19 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             img = img.cuda()
             label = label.cuda()
+
+            ## autocast selectively runs certain ops in fp16 and the others in fp32
+            ## usually ops that do accumulation (like batch norm) or exponentiation 
+            ## (like softmax) need to be run in fp32 for numerical stability
             with torch.autocast(device_type='cuda', dtype=torch.float16):
                 output = net(img, checkpoint_activations=args.checkpoint_activations)
                 iter_loss = loss_fn(output, label)
            
+            ## scaling loss before doing the backward pass
             scaler.scale(iter_loss).backward()
+            ## unscale gradients and run optimizer
             scaler.step(optimizer)
+            ## update loss scale 
             scaler.update()
             
             epoch_loss += iter_loss
