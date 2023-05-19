@@ -24,7 +24,8 @@ if __name__ == "__main__":
     ax.init(
                 G_data=args.G_data,
                 G_inter=args.G_inter,
-                G_intra=1,
+                G_intra_r=1,
+                G_intra_c=1,
                 mixed_precision=True,
                 fp16_allreduce=True,
                 cpu_offload=False
