@@ -95,7 +95,8 @@ class empty_dataset(torch.utils.data.Dataset):
 def init(
     G_inter: int,
     G_data: int,
-    G_intra: int = 1,
+    G_intra_r: int = 1,
+    G_intra_c: int = 1,
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
     fp16_allreduce=True,
@@ -123,10 +124,14 @@ def init(
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
-    comm_handle = communication_handle(G_inter, G_data, G_intra, gpus_per_node)
+    comm_handle = communication_handle(
+        G_inter, G_data, G_intra_r, G_intra_c, gpus_per_node
+    )
     config.G_inter = G_inter
     config.G_data = G_data
-    config.G_intra = G_intra
+    config.G_intra = G_intra_r * G_intra_c
+    config.G_intra_r = G_intra_r
+    config.G_intra_c = G_intra_c
     config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
     config.data_parallel_rank = comm_handle.data_parallel_rank
     config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
@@ -186,35 +191,20 @@ def create_dataloader(
         batch_size % (config.G_data * micro_batch_size) == 0
     ), "Batch Size should be divisible by the G_data*micro_batch_size"
 
-    if config.inter_layer_parallel_rank == 0:
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
-        )
-        data_loader = torch.utils.data.DataLoader(
-            dataset=dataset,
-            batch_size=config.batch_size_per_network,
-            shuffle=False,
-            num_workers=num_workers,
-            sampler=sampler,
-            drop_last=True,
-            *args,
-            **kwargs,
-        )  # not working with drop_last=False
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
+    )
+    data_loader = torch.utils.data.DataLoader(
+        dataset=dataset,
+        batch_size=config.batch_size_per_network,
+        shuffle=False,
+        num_workers=num_workers,
+        sampler=sampler,
+        drop_last=True,
+        *args,
+        **kwargs,
+    )  # not working with drop_last=False
 
-    else:
-        num_tensors = 1 if torch.is_tensor(dataset[0]) else len(dataset[0])
-        dataset = empty_dataset(len(dataset), num_tensors)
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
-        )
-        data_loader = torch.utils.data.DataLoader(
-            dataset=dataset,
-            batch_size=config.batch_size_per_network,
-            shuffle=False,
-            num_workers=0,
-            sampler=sampler,
-            drop_last=True,
-        )
     return data_loader
 
 

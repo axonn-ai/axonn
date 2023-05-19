@@ -24,7 +24,6 @@ class CPUAdam(Optimizer):
         bucket_size=16000000,
         coalescing_factor=4,
     ):
-
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -67,7 +66,7 @@ class CPUAdam(Optimizer):
 
     def empty_param_state(self, param):
         state = {
-            "step": 0,
+            "step": torch.tensor(0),
             "exp_avg": torch.zeros_like(
                 param, memory_format=torch.preserve_format
             ).pin_memory(),
@@ -174,6 +173,7 @@ class CPUAdam(Optimizer):
                         [],
                         [state["step"]],
                         amsgrad=False,
+                        maximize=False,
                         beta1=beta1,
                         beta2=beta2,
                         lr=lr,
