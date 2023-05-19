@@ -124,7 +124,9 @@ def init(
     """
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
-    comm_handle = communication_handle(G_inter, G_data, G_intra_r, G_intra_c, gpus_per_node)
+    comm_handle = communication_handle(
+        G_inter, G_data, G_intra_r, G_intra_c, gpus_per_node
+    )
     config.G_inter = G_inter
     config.G_data = G_data
     config.G_intra = G_intra_r * G_intra_c

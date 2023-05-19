@@ -18,17 +18,17 @@ class Linear(torch.nn.Module):
             assert out_features % self.outer_group_size == 0
             self.local_in_features = in_features // self.inner_group_size
             self.linear = torch.nn.Linear(
-                                            in_features=in_features//self.inner_group_size,
-                                            out_features=out_features//self.outer_group_size,
-                                        )        
+                in_features=in_features // self.inner_group_size,
+                out_features=out_features // self.outer_group_size,
+            )
         else:
             assert out_features % self.inner_group_size == 0
             assert in_features % self.outer_group_size == 0
             self.local_in_features = in_features // self.outer_group_size
             self.linear = torch.nn.Linear(
-                                            in_features=in_features//self.outer_group_size,
-                                            out_features=out_features//self.inner_group_size,
-                                        )        
+                in_features=in_features // self.outer_group_size,
+                out_features=out_features // self.inner_group_size,
+            )
 
         self.transpose = transpose
 

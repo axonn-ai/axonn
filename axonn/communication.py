@@ -14,7 +14,9 @@ class communication_handle:
     communication(NCCL) of GPU tensors.
     """
 
-    def __init__(self, G_inter: int, G_data: int, G_intra_r=1, G_intra_c=1, gpus_per_node=None):
+    def __init__(
+        self, G_inter: int, G_data: int, G_intra_r=1, G_intra_c=1, gpus_per_node=None
+    ):
         """Constructor for the communication handle
 
         Arguments:
@@ -46,8 +48,12 @@ class communication_handle:
         self.local_rank = self.world_rank % self.gpus_per_node
         torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra
-        cc = self.intra_layer_column_parallel_rank = self.intra_layer_parallel_rank % G_intra_c
-        rr = self.intra_layer_row_parallel_rank = self.intra_layer_parallel_rank // G_intra_c
+        self.intra_layer_column_parallel_rank = (
+            self.intra_layer_parallel_rank % G_intra_c
+        )
+        self.intra_layer_row_parallel_rank = (
+            self.intra_layer_parallel_rank // G_intra_c
+        )
         self.inter_layer_parallel_rank = (self.world_rank // G_intra) % G_inter
         self.data_parallel_rank = self.world_rank // (G_inter * G_intra)
 
@@ -100,14 +106,16 @@ class communication_handle:
                 )
                 if self.world_rank in ranks_in_ith_jth_intra_layer_group:
                     self.intra_layer_group = ith_jth_intra_layer_group
-                ## form row and column parallel groups
-                #G_intra_r x G_intra_c
+                # form row and column tensor parallel groups
+                # G_intra_r x G_intra_c
                 assert len(ranks_in_ith_jth_intra_layer_group) == G_intra_r * G_intra_c
                 intra_layer_ranks = ranks_in_ith_jth_intra_layer_group
                 for i in range(G_intra_r):
-                    offset = i * G_intra_c 
-                    group_members = intra_layer_ranks[offset:offset+G_intra_c]
-                    group = torch.distributed.new_group(ranks=group_members, backend="nccl")
+                    offset = i * G_intra_c
+                    group_members = intra_layer_ranks[offset : offset + G_intra_c]
+                    group = torch.distributed.new_group(
+                        ranks=group_members, backend="nccl"
+                    )
                     if self.world_rank == 0:
                         print(f"Inner TP group = {group_members}")
                     if self.world_rank in group_members:
@@ -115,12 +123,13 @@ class communication_handle:
 
                 for i in range(G_intra_c):
                     group_members = intra_layer_ranks[i::G_intra_c]
-                    group = torch.distributed.new_group(ranks=group_members, backend="nccl")
+                    group = torch.distributed.new_group(
+                        ranks=group_members, backend="nccl"
+                    )
                     if self.world_rank == 0:
                         print(f"Outer TP group = {group_members}")
                     if self.world_rank in group_members:
                         self.outer_intra_layer_parallel_group = group
-
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its

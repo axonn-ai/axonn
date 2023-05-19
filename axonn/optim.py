@@ -24,7 +24,6 @@ class CPUAdam(Optimizer):
         bucket_size=16000000,
         coalescing_factor=4,
     ):
-
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
