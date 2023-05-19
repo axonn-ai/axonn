@@ -51,9 +51,7 @@ class communication_handle:
         self.intra_layer_column_parallel_rank = (
             self.intra_layer_parallel_rank % G_intra_c
         )
-        self.intra_layer_row_parallel_rank = (
-            self.intra_layer_parallel_rank // G_intra_c
-        )
+        self.intra_layer_row_parallel_rank = self.intra_layer_parallel_rank // G_intra_c
         self.inter_layer_parallel_rank = (self.world_rank // G_intra) % G_inter
         self.data_parallel_rank = self.world_rank // (G_inter * G_intra)
 
