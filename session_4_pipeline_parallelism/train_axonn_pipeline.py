@@ -70,8 +70,8 @@ if __name__ == "__main__":
     ## Step 7 - Train
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
-   
-    print(f"Model Size = {params} B")
+  
+    log_dist(f"Model Params = {num_params(net)*ax.config.G_inter}", [0])
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0
@@ -83,9 +83,6 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             img = img.cuda()
             label = label.cuda()
-            #with torch.autocast(device_type='cuda', dtype=torch.float16):
-            #    output = net(img, checkpoint_activations=args.checkpoint_activations)
-            #    iter_loss = loss_fn(output, label)
             iter_loss = ax.run_batch(img, label)
             optimizer.step()
             
