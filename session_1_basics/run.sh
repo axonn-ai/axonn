@@ -5,7 +5,7 @@
 #SBATCH --time=01:00:00 
 #SBATCH -A isc2023-aac
 
-DATA_DIR="/scratch/zt1/project/bhatele-lab/shared/"
+DATA_DIR="/scratch/zt1/project/isc2023/shared/"
 
 . /scratch/zt1/project/isc2023/shared/tutorial-venv/bin/activate
 
