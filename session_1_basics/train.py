@@ -34,14 +34,7 @@ if __name__ == "__main__":
     train_loader = torch.utils.data.DataLoader(train_dataset, 
             batch_size=args.batch_size, drop_last=True, num_workers=1)
 
-
-    test_dataset = torchvision.datasets.MNIST(
-        root=args.data_dir, train=False, transform=augmentations
-    )
-
-    test_loader = torch.utils.data.DataLoader(train_dataset, 
-            batch_size=args.batch_size, drop_last=True)
-    
+   
     ## Step 2 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
 
