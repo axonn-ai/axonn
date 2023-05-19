@@ -173,6 +173,7 @@ class CPUAdam(Optimizer):
                         [],
                         [state["step"]],
                         amsgrad=False,
+                        maximize=False,
                         beta1=beta1,
                         beta2=beta2,
                         lr=lr,
