@@ -66,7 +66,7 @@ class CPUAdam(Optimizer):
 
     def empty_param_state(self, param):
         state = {
-            "step": 0,
+            "step": torch.tensor(0),
             "exp_avg": torch.zeros_like(
                 param, memory_format=torch.preserve_format
             ).pin_memory(),
