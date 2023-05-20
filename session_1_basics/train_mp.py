@@ -13,8 +13,8 @@ from model.fc_net_sequential import FC_Net
 from utils import print_memory_stats, num_params
 from args import create_parser
 
-NUM_EPOCHS=10
-PRINT_EVERY=1
+NUM_EPOCHS=2
+PRINT_EVERY=200
 
 
 if __name__ == "__main__":
@@ -51,6 +51,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
    
+    print("Start training in mixed-precision ...\n")
     print(f"Model Size = {params} B")
 
     ## Scales the loss prior to the backward pass to prevent underflow of gradients
@@ -87,8 +88,9 @@ if __name__ == "__main__":
             iter_times.append(iter_time)
             if iter_ % PRINT_EVERY == 0:
                 print(f"Epoch {epoch} | Iter {iter_}/{len(train_loader)} | Iter Train Loss = {iter_loss:.3f} | Iter Time = {iter_time/1000:.6f} s")
-                print_memory_stats()
+                # print_memory_stats()
             iter_ += 1
         print(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s")
         
+    print("\nEnd of training.")
 
