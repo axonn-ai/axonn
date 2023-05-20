@@ -3,7 +3,7 @@
 #SBATCH -p gpu
 #SBATCH --gres=gpu:a100:4
 #SBATCH --ntasks-per-node 128
-#SBATCH --time=01:00:00
+#SBATCH --time=00:05:00
 #SBATCH -A isc2023-aac
 
 
@@ -13,4 +13,4 @@ module load gcc/9.4.0 openmpi/gcc
 . /scratch/zt1/project/isc2023/shared/tutorial-venv/bin/activate
 
 
-mpirun -np 4 python train_zero.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --checkpoint-activations --deepspeed_config ./ds_config.json 
+mpirun -np 4 python train_deepspeed.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --checkpoint-activations --deepspeed_config ./ds_config.json 

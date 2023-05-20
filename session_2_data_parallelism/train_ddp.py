@@ -16,8 +16,8 @@ from model.fc_net_sequential import FC_Net
 from utils import print_memory_stats, num_params, log_dist
 from args import create_parser
 
-NUM_EPOCHS=10
-PRINT_EVERY=1
+NUM_EPOCHS=2
+PRINT_EVERY=200
 
 def set_device_and_init_torch_dist():
     world_rank = MPI.COMM_WORLD.Get_rank()
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
    
-    print(f"Model Size = {params} B")
+    log_dist(f"Model Size = {params} B", ranks=[0])
 
     scaler = GradScaler()
 
@@ -100,7 +100,6 @@ if __name__ == "__main__":
         iter_ = 0
         iter_times = []
         for img, label in train_loader:
-            log_dist(f"Input Shape = {img.shape}", [0])
             start_event.record()
             optimizer.zero_grad()
             img = img.cuda()
@@ -121,8 +120,7 @@ if __name__ == "__main__":
             iter_times.append(iter_time)
             if iter_ % PRINT_EVERY == 0:
                 log_dist(f"Epoch {epoch} | Iter {iter_}/{len(train_loader)} | Iter Train Loss = {iter_loss:.3f} | Iter Time = {iter_time/1000:.6f} s", [0])
-                print_memory_stats()
             iter_ += 1
         log_dist(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s", [0])
-        
+        print_memory_stats()
 
