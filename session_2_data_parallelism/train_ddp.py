@@ -22,7 +22,8 @@ PRINT_EVERY=1
 def set_device_and_init_torch_dist():
     world_rank = MPI.COMM_WORLD.Get_rank()
     world_size = MPI.COMM_WORLD.Get_size()
-    
+
+    # assign a unique GPU to each MPI process on a node    
     local_rank = world_rank % torch.cuda.device_count()
     torch.cuda.set_device(local_rank)
 
@@ -30,7 +31,8 @@ def set_device_and_init_torch_dist():
     master_ip = os.getenv("MASTER_ADDR", "localhost")
     master_port = os.getenv("MASTER_PORT", "6000")
     init_method += master_ip + ":" + master_port
-    
+   
+    # create a process group across all processes 
     torch.distributed.init_process_group(
                 init_method=init_method,
                 backend="nccl",
@@ -61,6 +63,7 @@ if __name__ == "__main__":
         root=args.data_dir, train=True, transform=augmentations
     )
 
+    # create a sampler to assign different data to each GPU
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset,
         num_replicas=dist.get_world_size(),
@@ -105,7 +108,8 @@ if __name__ == "__main__":
             with torch.autocast(device_type='cuda', dtype=torch.float16):
                 output = net(img, checkpoint_activations=args.checkpoint_activations)
                 iter_loss = loss_fn(output, label)
-           
+
+            # DDP does all reduce in the backward pass
             scaler.scale(iter_loss).backward()
             scaler.step(optimizer)
             scaler.update()

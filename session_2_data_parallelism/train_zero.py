@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
-    ## Step 1 - Initialize Pytorch Distributed
+    ## Step 1 - Initialize DeepSpeed Distributed
     deepspeed.init_distributed()
     log_dist('initialized deepspeed', ranks=[0])
 
@@ -36,7 +36,7 @@ if __name__ == "__main__":
         ]
     )
 
-    ## Step 2 - Create Dataloaders with sampler
+    ## Step 2 - Create dataset
     train_dataset = torchvision.datasets.MNIST(
         root=args.data_dir, train=True, transform=augmentations
     )
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     ## Step 4 - Create model, optimizer, trainloader
 
-    ## needs to be set manually for some reason
+    ## needs to be set manually when using mpirun
     args.local_rank = int(os.environ.get("LOCAL_RANK"))
     
     model_engine, optimizer, train_loader, __ = deepspeed.initialize(
