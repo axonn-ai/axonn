@@ -17,6 +17,8 @@ PRINT_EVERY=200
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+
+    ## Step 0 - Create a dataset object with transformations
     augmentations = transforms.Compose(
         [
             transforms.Resize(args.image_size, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -26,11 +28,11 @@ if __name__ == "__main__":
         ]
     )
 
-    ## Step 1 - Create Dataloaders
     train_dataset = torchvision.datasets.MNIST(
         root=args.data_dir, train=True, transform=augmentations
     )
 
+    ## Step 1 - Create Dataloader for MNIST
     train_loader = torch.utils.data.DataLoader(train_dataset, 
             batch_size=args.batch_size, drop_last=True, num_workers=1)
 
@@ -46,10 +48,11 @@ if __name__ == "__main__":
     ## Step 4 - Create Loss Function
     loss_fn = torch.nn.CrossEntropyLoss()
 
-    ## Step 5 - Train
+    ## Create CUDA events for profiling
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
    
+    ## Step 5 - Train
     print("Start training ...\n")
     print(f"Model Size = {params} B")
 
@@ -62,11 +65,14 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             img = img.cuda()
             label = label.cuda()
+
+            # Forward pass
             output = net(img)
             iter_loss = loss_fn(output, label)
             iter_loss.backward()
             optimizer.step()
             epoch_loss += iter_loss
+
             stop_event.record()
             torch.cuda.synchronize()
             iter_time = start_event.elapsed_time(stop_event)
