@@ -72,8 +72,12 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
   
-    log_dist(f"Model Params = {num_params(net)*ax.config.G_inter}", [0])
-    log_dist(f"Begin Training with AxoNN's Pipeline Parallelism ... \n", [0])
+    log_dist(f"Model Params = {num_params(net)*ax.config.G_inter/1e9} B", [0])
+
+    if args.G_data == 1:
+        log_dist(f"Begin Training with AxoNN's Pipeline Parallelism ... \n", [0])
+    else:
+        log_dist(f"Begin Training with AxoNN's Hybrid Parallelism ... \n", [0])
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0

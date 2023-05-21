@@ -15,8 +15,20 @@ export PATH="${PATH}:${INSTALL_PATH}/bin"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PATH}/lib"
 
 ## Command for DDP
-G_INTER=2
-G_DATA=2
+
+
+HYBRID_PARR="${HYBRID_PARR:=false}"
+
+G_INTER=4
+
+if [ ${HYBRID_PARR} == "true" ]; then
+	G_INTER=2
+fi
+
+G_DATA=$(( 4 / G_INTER ))
+
+echo ${G_DATA}
+echo ${G_INTER}
 
 mpirun -np 4 python train_axonn_pipeline.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --G-inter ${G_INTER} --G-data ${G_DATA} --micro-batch-size 4 --checkpoint-activations
 
