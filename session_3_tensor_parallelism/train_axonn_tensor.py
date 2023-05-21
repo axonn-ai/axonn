@@ -75,7 +75,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
   
-    log_dist(f"Model Params = {num_params(net)*ax.config.G_intra} B", [0])
+    log_dist(f"Model Params = {num_params(net)*ax.config.G_intra/1e9} B", [0])
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0
