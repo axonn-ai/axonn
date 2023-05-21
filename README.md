@@ -1,5 +1,7 @@
 # ISC 23 - Tutorial on Distributed Training of Neural Networks
 
+[![Join slack](https://img.shields.io/badge/slack-axonn--users-blue)](https://join.slack.com/t/axonn-users/shared_invite/zt-1vw4fm25c-XAH9n9d_3hg5TuHMw_7Ggw)
+
 Code material for the tutorial can be found in this repository. 
 
 **Contents** 
