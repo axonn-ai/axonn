@@ -67,7 +67,7 @@ if __name__ == "__main__":
             img = img.cuda()
             label = label.cuda()
 
-            ## autocast selectively runs certain ops in fp16 and the others in fp32
+            ## autocast selectively runs certain ops in fp16 and others in fp32
             ## usually ops that do accumulation (like batch norm) or exponentiation 
             ## (like softmax) need to be run in fp32 for numerical stability
             with torch.autocast(device_type='cuda', dtype=torch.float16):

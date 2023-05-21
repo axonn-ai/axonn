@@ -69,10 +69,14 @@ if __name__ == "__main__":
             # Forward pass
             output = net(img)
             iter_loss = loss_fn(output, label)
+            
+            # Backawrd Pass
             iter_loss.backward()
+            
+            # Optimizer
             optimizer.step()
+            
             epoch_loss += iter_loss
-
             stop_event.record()
             torch.cuda.synchronize()
             iter_time = start_event.elapsed_time(stop_event)
