@@ -14,12 +14,16 @@ class FC_Net(nn.Module):
     def forward(self, x, checkpoint_activations=False):
         x = x.view(x.shape[0], -1)
         x = self.embed(x)
+        ## drop partitions x across the tensor parallel GPUs
+        ## needs to be done before the first tensor parallel layer
         x = drop(x)
         for layer in self.layers:
             if not checkpoint_activations:
                 x = layer(x)
             else:
                 x = torch.utils.checkpoint.checkpoint(layer, x)
+        ## gather recovers x from the tensor parallel GPUs
+        ## needs to be done after the last tensor parallel layer
         x = gather(x)
         x = self.clf(x)
         return x
@@ -28,9 +32,13 @@ class FC_Net(nn.Module):
 class FC_Net_Layer(nn.Module):
     def __init__(self, hidden_size):
         super(FC_Net_Layer, self).__init__()
-        #self.norm = nn.LayerNorm(hidden_size) 
-        self.linear_1 = Tensor_Parallel_Linear(in_features=hidden_size, out_features=4 * hidden_size, transpose=False)
+        #self.norm = nn.LayerNorm(hidden_size)
+
+        ## replace nn.Linear with Tensor Parallel Linear
+        self.linear_1 = Tensor_Parallel_Linear(in_features=hidden_size, out_features=4 * hidden_size)
         self.relu = nn.ReLU()
+        ## replace nn.Linear with Tensor Parallel Linear
+        ## every alternate layer needs to be 'transposed'
         self.linear_2 = Tensor_Parallel_Linear(in_features = 4 * hidden_size, out_features = hidden_size, transpose=True)
 
     def forward(self, x):

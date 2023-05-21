@@ -14,7 +14,6 @@ module load gcc/9.4.0 openmpi/gcc
 
 G_INTRA_ROW=2
 G_INTRA_COL=2
-G_DATA=1
 
-mpirun -np 4 python train_axonn_tensor.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --G-intra-r ${G_INTRA_ROW} --G-intra-c ${G_INTRA_COL} --G-data ${G_DATA} --micro-batch-size 4 --checkpoint-activations
+mpirun -np 4 python train_axonn_tensor.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --G-intra-r ${G_INTRA_ROW} --G-intra-c ${G_INTRA_COL} --G-data 1  --micro-batch-size 4 --checkpoint-activations
 
