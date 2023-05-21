@@ -1,5 +1,7 @@
 # ISC 23 - Tutorial on Distributed Training of Neural Networks
 
+[![Join slack](https://img.shields.io/badge/slack-axonn--users-blue)](https://join.slack.com/t/axonn-users/shared_invite/zt-1vw4fm25c-XAH9n9d_3hg5TuHMw_7Ggw)
+
 Code material for the tutorial can be found in this repository. 
 
 **Contents** 
@@ -10,6 +12,8 @@ Code material for the tutorial can be found in this repository.
 * [Pipeline Parallelism](#pipeline-parallelism)
 
 ## Setup 
+
+To request an account on Zaratan, please fill [this form](https://docs.google.com/forms/d/e/1FAIpQLSeHoELzzWfOlo3YnCDxLyfY581hWuSidjWgzIvUq2gGFOinWw/viewform?usp=sf_link).
 
 We have built the dependencies required for this tutorial in a shared python virtual enviroment, which can be activated as follows:
 
