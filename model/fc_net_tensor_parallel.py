@@ -28,13 +28,13 @@ class FC_Net(nn.Module):
 class FC_Net_Layer(nn.Module):
     def __init__(self, hidden_size):
         super(FC_Net_Layer, self).__init__()
-        #self.norm = nn.LayerNorm(hidden_size)
+        self.norm = nn.LayerNorm(hidden_size // ax.config.G_intra_c)
         self.linear_1 = Tensor_Parallel_Linear(in_features=hidden_size, out_features=4 * hidden_size, transpose=False)
         self.relu = nn.ReLU()
         self.linear_2 = Tensor_Parallel_Linear(in_features = 4 * hidden_size, out_features = hidden_size, transpose=True)
 
     def forward(self, x):
-        #h = self.norm(x)
+        h = self.norm(x)
         h = self.linear_1(x)
         h = self.relu(h)
         h = self.linear_2(h)
