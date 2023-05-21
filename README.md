@@ -13,6 +13,8 @@ Code material for the tutorial can be found in this repository.
 
 ## Setup 
 
+To request an account on Zaratan, please fill [this form](https://docs.google.com/forms/d/e/1FAIpQLSeHoELzzWfOlo3YnCDxLyfY581hWuSidjWgzIvUq2gGFOinWw/viewform?usp=sf_link).
+
 We have built the dependencies required for this tutorial in a shared python virtual enviroment, which can be activated as follows:
 
 ```bash
