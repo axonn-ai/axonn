@@ -73,6 +73,7 @@ if __name__ == "__main__":
     stop_event = torch.cuda.Event(enable_timing=True)
   
     log_dist(f"Model Params = {num_params(net)*ax.config.G_inter}", [0])
+    log_dist(f"Begin Training with AxoNN's Pipeline Parallelism ... \n", [0])
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0
@@ -98,4 +99,4 @@ if __name__ == "__main__":
         if ax.config.inter_layer_parallel_rank == ax.config.G_inter-1 and ax.config.data_parallel_rank == 0:
             ax.print_status(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s")
         
-
+    log_dist(f"\n End Training ...", [0])
