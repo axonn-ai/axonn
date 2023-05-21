@@ -61,6 +61,21 @@ sbatch --reservation=isc2023 run_deepspeed.sh
 
 ## Tensor Parallelism
 
+```bash
+cd session_3_tensor_parallelism
+sbatch --reservation=isc2023 run.sh
+```
+
 ## Pipeline Parallelism
 
 
+```bash
+cd session_3_pipeline_parallelism
+sbatch --reservation=isc2023 run.sh
+```
+
+### Hybrid Pipeline+Data Parallelism
+
+```bash
+HYBRID_PARR=true sbatch --reservation=isc2023 run.sh
+```
