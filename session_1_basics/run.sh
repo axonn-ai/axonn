@@ -12,6 +12,9 @@ DATA_DIR="/scratch/zt1/project/isc2023/shared/"
 SCRIPT=train.py
 ARGS="--num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64"
 
+MIXED_PRECISION="${MIXED_PRECISION:=false}"
+CHECKPOINT_ACTIVATIONS="${CHECKPOINT_ACTIVATIONS:=false}"
+
 if [ ${MIXED_PRECISION} == "true" ]; then
 	SCRIPT="train_mp.py"
 fi
