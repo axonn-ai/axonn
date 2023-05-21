@@ -49,14 +49,14 @@ CHECKPOINT_ACTIVATIONS=true sbatch --reservation=isc2023 run.sh
 
 ```bash
 cd session_2_data_parallelism
-sbatch run_ddp.sh
+sbatch --reservation=isc2023 run_ddp.sh
 ```
 
 ### Zero Redundancy Optimizer (ZeRO)
 
 
 ```bash
-sbatch run_deepspeed.sh
+sbatch --reservation=isc2023 run_deepspeed.sh
 ```
 
 ## Tensor Parallelism
