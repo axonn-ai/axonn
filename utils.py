@@ -4,8 +4,11 @@ import torch.distributed as dist
 def print_memory_stats():
     curr_memory = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
     peak_memory = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
-
-    print(f"Current Memory Usage = {curr_memory:.2f} GB | Peak Memory Usage = {peak_memory:.2f} GB")
+    if dist.is_initialized():
+        if dist.get_rank() == 0:
+            print(f"Current Memory Usage = {curr_memory:.2f} GB | Peak Memory Usage = {peak_memory:.2f} GB")
+    else:
+        print(f"Current Memory Usage = {curr_memory:.2f} GB | Peak Memory Usage = {peak_memory:.2f} GB")
 
 def num_params(model):
     params = 0

@@ -13,8 +13,8 @@ from model.fc_net_pipeline_parallel import FC_Net
 from utils import print_memory_stats, num_params, log_dist
 from args import create_parser
 
-NUM_EPOCHS=10
-PRINT_EVERY=1
+NUM_EPOCHS=2
+PRINT_EVERY=200
 
 if __name__ == "__main__":
     parser = create_parser()
@@ -79,7 +79,6 @@ if __name__ == "__main__":
         iter_ = 0
         iter_times = []
         for img, label in train_loader:
-            log_dist(f"Input Shape = {img.shape}", [0])
             start_event.record()
             optimizer.zero_grad()
             img = img.cuda()
@@ -92,11 +91,11 @@ if __name__ == "__main__":
             torch.cuda.synchronize()
             iter_time = start_event.elapsed_time(stop_event)
             iter_times.append(iter_time)
-            if iter_ % PRINT_EVERY == 0 and ax.config.inter_layer_parallel_rank == ax.config.G_inter-1:
+            if iter_ % PRINT_EVERY == 0 and ax.config.inter_layer_parallel_rank == ax.config.G_inter-1 and ax.config.data_parallel_rank == 0:
                 ax.print_status(f"Epoch {epoch} | Iter {iter_}/{len(train_loader)} | Iter Train Loss = {iter_loss:.3f} | Iter Time = {iter_time/1000:.6f} s")
                 print_memory_stats()
             iter_ += 1
-        if ax.config.inter_layer_parallel_rank == ax.config.G_inter-1:
+        if ax.config.inter_layer_parallel_rank == ax.config.G_inter-1 and ax.config.data_parallel_rank == 0:
             ax.print_status(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s")
         
 

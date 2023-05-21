@@ -64,6 +64,7 @@ if __name__ == "__main__":
     stop_event = torch.cuda.Event(enable_timing=True)
    
     log_dist(f"Model Size = {params} B", ranks=[0])
+    log_dist(f"Start training with DeepSpeed \n", [0])
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0
@@ -91,4 +92,4 @@ if __name__ == "__main__":
         print_memory_stats()
         log_dist(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s", [0])
         
-
+    log_dist("\n End training ...", [0])

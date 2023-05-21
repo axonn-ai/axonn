@@ -92,7 +92,7 @@ if __name__ == "__main__":
     stop_event = torch.cuda.Event(enable_timing=True)
    
     log_dist(f"Model Size = {params} B", ranks=[0])
-
+    log_dist("Start training with DDP...\n", [0])
     scaler = GradScaler()
 
     for epoch in range(NUM_EPOCHS):
@@ -123,4 +123,5 @@ if __name__ == "__main__":
             iter_ += 1
         log_dist(f"Epoch {epoch} : Epoch Train Loss= {epoch_loss/len(train_loader):.3f} | Average Iter Time = {np.mean(iter_times)/1000:.6f} s", [0])
         print_memory_stats()
-
+    
+    log_dist("\nEnd training ..", [0])
