@@ -20,7 +20,7 @@ We have pre-built the dependencies required for this tutorial on Zaratan. This
 will be activated automatically when you run the bash scripts.
 
 The training dataset i.e. [MNIST](http://yann.lecun.com/exdb/mnist/) has also
-been downloaded in `. /scratch/zt1/project/isc2023/shared/MNIST`.
+been downloaded in `/scratch/zt1/project/isc2023/shared/MNIST`.
 
 ## Basics of Model Training
 
