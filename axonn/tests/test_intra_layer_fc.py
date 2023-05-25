@@ -1,8 +1,6 @@
 import torch
-import numpy as np
 import pytest
 from axonn import axonn as ax
-import torch.distributed as dist
 from axonn.intra_layer.communication import _drop, _gather
 from axonn.intra_layer import Tensor_Parallel_Linear
 
@@ -11,7 +9,7 @@ from axonn.intra_layer import Tensor_Parallel_Linear
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
 def test_fw_pass(G_intra_r, G_intra_c, B, H):
-    ## These tests are in fp-32
+    # These tests are in fp-32
     torch.manual_seed(42)
     ax.init(
         G_data=1,
@@ -52,6 +50,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
 def test_bw_pass(G_intra_r, G_intra_c, B, H):
+    # These tests are in fp-32
     torch.manual_seed(42)
     ax.init(
         G_data=1,
@@ -65,7 +64,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
     inner_group = ax.comm_handle.inner_intra_layer_parallel_group
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    ## parallel backward pass
+    # parallel backward pass
     layer = Tensor_Parallel_Linear(in_features=H, out_features=H, bias=False).cuda()
     X_local = (
         _drop(X, 1, inner_group).detach().clone()
@@ -75,7 +74,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
     Y_local_grad = _drop(Y_grad, 1, outer_group)
     Y_local.backward(Y_local_grad)
 
-    ## sequential backward pass
+    # sequential backward pass
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=False).cuda()
     with torch.no_grad():
         weight_sequential = _gather(
