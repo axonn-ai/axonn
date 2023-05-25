@@ -1,3 +1,4 @@
 external/megatron
 *__pycache__
 examples/dataset
+axonn.egg-info/

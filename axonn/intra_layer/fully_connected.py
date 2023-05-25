@@ -21,7 +21,7 @@ class Linear(torch.nn.Module):
                 in_features=in_features // self.inner_group_size,
                 out_features=out_features // self.outer_group_size,
                 *args,
-                **kwargs
+                **kwargs,
             )
         else:
             assert out_features % self.inner_group_size == 0
