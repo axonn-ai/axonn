@@ -5,7 +5,7 @@ from .communication import ForwardAllReduce, BackwardAllReduce, Drop
 
 
 class Linear(torch.nn.Module):
-    def __init__(self, in_features, out_features, transpose=False):
+    def __init__(self, in_features, out_features, *args, transpose=False, **kwargs):
         super(Linear, self).__init__()
         self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
         self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
@@ -20,6 +20,8 @@ class Linear(torch.nn.Module):
             self.linear = torch.nn.Linear(
                 in_features=in_features // self.inner_group_size,
                 out_features=out_features // self.outer_group_size,
+                *args,
+                **kwargs,
             )
         else:
             assert out_features % self.inner_group_size == 0
@@ -28,6 +30,8 @@ class Linear(torch.nn.Module):
             self.linear = torch.nn.Linear(
                 in_features=in_features // self.outer_group_size,
                 out_features=out_features // self.inner_group_size,
+                *args,
+                **kwargs,
             )
 
         self.transpose = transpose

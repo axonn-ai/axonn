@@ -57,8 +57,10 @@ class communication_handle:
 
         # create communicator for point-to-point(MPI) communication
         colour = self.intra_layer_parallel_rank + G_intra * self.data_parallel_rank
+        # this needs to be checked
         self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
         assert self.p2p_mpi_comm.Get_size() == G_inter
+
         # create communicator for collective (NCCL) communication
         if not torch.distributed.is_initialized():
             init_method = "tcp://"
@@ -72,8 +74,6 @@ class communication_handle:
                 init_method=init_method,
             )
 
-        if self.world_rank == 0:
-            print("Creating data parallel groups")
         for i in range(G_inter):
             for j in range(G_intra):
                 # all ranks have to form all data parallel communicators and not
@@ -82,16 +82,12 @@ class communication_handle:
                     k * self.G_inter * self.G_intra + i * G_intra + j
                     for k in range(self.G_data)
                 ]
-                if self.world_rank == 0:
-                    print(ranks_in_ith_jth_data_parallel_group)
                 ith_jth_data_parallel_group = torch.distributed.new_group(
                     ranks=ranks_in_ith_jth_data_parallel_group, backend="nccl"
                 )
                 if self.world_rank in ranks_in_ith_jth_data_parallel_group:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
 
-        if self.world_rank == 0:
-            print("Creating intra-layer parallel groups")
         # create communicators for intra-layer parallelism
         for i in range(G_data):
             for j in range(G_inter):
@@ -114,8 +110,6 @@ class communication_handle:
                     group = torch.distributed.new_group(
                         ranks=group_members, backend="nccl"
                     )
-                    if self.world_rank == 0:
-                        print(f"Inner TP group = {group_members}")
                     if self.world_rank in group_members:
                         self.inner_intra_layer_parallel_group = group
 
@@ -124,8 +118,6 @@ class communication_handle:
                     group = torch.distributed.new_group(
                         ranks=group_members, backend="nccl"
                     )
-                    if self.world_rank == 0:
-                        print(f"Outer TP group = {group_members}")
                     if self.world_rank in group_members:
                         self.outer_intra_layer_parallel_group = group
 

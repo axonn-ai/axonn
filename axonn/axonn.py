@@ -136,19 +136,12 @@ def init(
     config.data_parallel_rank = comm_handle.data_parallel_rank
     config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
     is_initialized = True
-    # assert mixed_precision, "Only supports mixed precision at apex O2 level"
-    # assert fp16_allreduce, "Only supports fp-16 allreduce"
     if mixed_precision:
         computation_dtype = torch.float16
     else:
         computation_dtype = torch.float32
     _fp16_all_reduce = fp16_allreduce
     _cpu_offload = cpu_offload
-    if comm_handle.world_rank == 0:
-        print(
-            f"Running with G_data={config.G_data} X G_inter={config.G_inter}",
-            f"X G_intra={config.G_intra}",
-        )
 
 
 def get_comm_handle():
