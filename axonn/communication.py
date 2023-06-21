@@ -29,8 +29,13 @@ class communication_handle:
             kernels. AxoNN will just create communicationgroups for
             intra-layer parallelism
         """
-        self.world_rank = MPI.COMM_WORLD.Get_rank()
-        self.world_size = MPI.COMM_WORLD.Get_size()
+        if not torch.distributed.is_initialized():
+            self.world_rank = MPI.COMM_WORLD.Get_rank()
+            self.world_size = MPI.COMM_WORLD.Get_size()
+        else:
+            self.world_rank = torch.distributed.get_rank()
+            self.world_size = torch.distributed.get_world_size()
+
         G_intra = G_intra_r * G_intra_c
         assert (
             G_inter * G_data * G_intra == self.world_size
@@ -56,10 +61,12 @@ class communication_handle:
         self.data_parallel_rank = self.world_rank // (G_inter * G_intra)
 
         # create communicator for point-to-point(MPI) communication
-        colour = self.intra_layer_parallel_rank + G_intra * self.data_parallel_rank
-        # this needs to be checked
-        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
-        assert self.p2p_mpi_comm.Get_size() == G_inter
+        self.p2p_mpi_comm = None
+        if G_inter > 1:
+            colour = self.intra_layer_parallel_rank + G_intra * self.data_parallel_rank
+            # this needs to be checked
+            self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
+            assert self.p2p_mpi_comm.Get_size() == G_inter
 
         # create communicator for collective (NCCL) communication
         if not torch.distributed.is_initialized():
