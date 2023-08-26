@@ -1,4 +1,4 @@
-# AxoNN
+# <img src="https://github.com/axonn-ai/axonn/blob/c356b821c2020c7dcd2181dfacc226619bfd5240/logo.png" width="64" valign="middle" alt="hatchet"/> AxoNN
 
 [![rtx-3090 tests](https://github.com/hpcgroup/axonn/actions/workflows/nvidia-tests.yaml/badge.svg)](https://github.com/hpcgroup/axonn/actions/workflows/nvidia-tests.yaml)
 [![docs](https://readthedocs.org/projects/axonn/badge/?version=latest)](https://axonn.readthedocs.io/en/latest/?badge=latest)
