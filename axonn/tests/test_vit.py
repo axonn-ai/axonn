@@ -31,7 +31,7 @@ def test_vit_mnist():
         G_data=G_data,
         G_inter=G_inter,
         mixed_precision=True,
-        fp16_allreduce=True,
+        bf16_allreduce=True,
         cpu_offload=cpu_offload,
     )
 

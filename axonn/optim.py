@@ -36,8 +36,8 @@ class CPUAdam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
 
-        assert ax.computation_dtype == torch.float16
-        assert ax._fp16_all_reduce
+        assert ax.computation_dtype == torch.bfloat16
+        assert ax._bf16_all_reduce
 
         self.bucket_size = bucket_size
         self.coalescing_factor = coalescing_factor
@@ -78,15 +78,15 @@ class CPUAdam(Optimizer):
         return state
 
     def zero_grad(self):
-        ax.model_grads_fp16.zero_()
+        ax.model_grads_bf16.zero_()
 
     def step(self, closure=None):
         assert closure is None, "AxoNN CPUAdam does not support closure yet"
         stream = self.stream
         bucket_size = self.bucket_size
         flat_master_params = ax.model_params_fp32
-        flat_fp16_grad = ax.model_grads_fp16
-        flat_fp16_params = ax.model_params_fp16
+        flat_bf16_grad = ax.model_grads_bf16
+        flat_bf16_params = ax.model_params_bf16
         exp_avg_buffer, exp_avg_sq_buffer, param_buffer, grad_buffer = self.buffers
 
         skip_update = False
@@ -120,7 +120,7 @@ class CPUAdam(Optimizer):
                     start_index + bucket_size * nbf, self.group_offsets[group_no + 1]
                 )
                 event = ax.comm_handle.allreduce(
-                    flat_fp16_grad[start_index:end_index], async_op=True
+                    flat_bf16_grad[start_index:end_index], async_op=True
                 )
                 nccl_events.append(event)
                 start_index = end_index
@@ -155,7 +155,7 @@ class CPUAdam(Optimizer):
                         nccl_events[chunk_no // nbf].wait()
 
                     grad_buffer[:size].copy_(
-                        flat_fp16_grad[start_index:end_index], non_blocking=True
+                        flat_bf16_grad[start_index:end_index], non_blocking=True
                     )
                     fp32_grad = grad_buffer[:size].div_(loss_scale)
                     isnan = ax._check_nan(fp32_grad)
@@ -180,7 +180,7 @@ class CPUAdam(Optimizer):
                         weight_decay=weight_decay,
                         eps=eps,
                     )
-                    flat_fp16_params[start_index:end_index].copy_(
+                    flat_bf16_params[start_index:end_index].copy_(
                         param_buffer[:size], non_blocking=True
                     )
                     state["exp_avg"].copy_(exp_avg_buffer[:size], non_blocking=True)

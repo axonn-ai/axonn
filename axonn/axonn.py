@@ -35,14 +35,14 @@ model = None
 # loss function
 criterion = None
 # reference to flattened model params
-model_params_fp32, model_params_fp16 = None, None
+model_params_fp32, model_params_bf16 = None, None
 # reference to flattened model gradients
-model_grads_fp32, model_grads_fp16 = None, None
+model_grads_fp32, model_grads_bf16 = None, None
 fp32_optimizer = None
-# the computation dtype (one of fp16/fp32)
+# the computation dtype (one of bf16/fp32)
 computation_dtype = None
-# fp16 all reduce, only applicable with mixed precision
-_fp16_all_reduce = None
+# bf16 all reduce, only applicable with mixed precision
+_bf16_all_reduce = None
 # loss_scale
 loss_scale = 2.0**16
 max_scale = 2.0**24
@@ -99,7 +99,7 @@ def init(
     G_intra_c: int = 1,
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
-    fp16_allreduce=True,
+    bf16_allreduce=True,
     cpu_offload=False,
 ) -> None:
     """
@@ -115,14 +115,14 @@ def init(
         gpus_per_node (int, optional):  number of GPUs per node, if not
             provided this is inferred using pytorch
         mixed_precision (bool): whether to use mixed precision
-        fp16_allreduce (bool): invoke all reduce on fp16 parameters,
+        bf16_allreduce (bool): invoke all reduce on bf16 parameters,
         only applicable when mixed precision is True
         cpu_offload (bool): offload optimizer states and fp32 parameters to
         the cpu to save gpu memory. Currently only works with
-        mixed_precision, fp16_allreduce and axonn.optim.CPUAdam optimizer.
+        mixed_precision, bf16_allreduce and axonn.optim.CPUAdam optimizer.
 
     """
-    global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
+    global comm_handle, is_initialized, computation_dtype, _bf16_all_reduce
     global _cpu_offload
     comm_handle = communication_handle(
         G_inter, G_data, G_intra_r, G_intra_c, gpus_per_node
@@ -137,10 +137,10 @@ def init(
     config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
     is_initialized = True
     if mixed_precision:
-        computation_dtype = torch.float16
+        computation_dtype = torch.bfloat16
     else:
         computation_dtype = torch.float32
-    _fp16_all_reduce = fp16_allreduce
+    _bf16_all_reduce = bf16_allreduce
     _cpu_offload = cpu_offload
 
 
@@ -227,9 +227,9 @@ def _initialize_mixed_precision(
     model: torch.nn.Module, optimizer: torch.optim.Optimizer
 ) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
     """
-    Initialize mixed precision. Makes model parameters and gradients fp-16 and
+    Initialize mixed precision. Makes model parameters and gradients bf-16 and
     optimizer parameters as an fp-32 copy. Similar to Apex's O2 mode.
-    Also flattens fp-32/fp-16 parameters and gradients for a bulk
+    Also flattens fp-32/bf-16 parameters and gradients for a bulk
     descaling and all-reduce.
 
     Arguments:
@@ -237,29 +237,29 @@ def _initialize_mixed_precision(
         optimizer: the optimizer for the model
 
     Returns
-        model: modified model object with fp-16 parameters and gradients
+        model: modified model object with bf-16 parameters and gradients
         optimizer : modified optimizer object with fp-32 parameters and gradients
     """
-    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    global model_params_fp32, model_params_bf16, model_grads_fp32, model_grads_bf16
     assert (
-        computation_dtype == torch.float16
+        computation_dtype == torch.bfloat16
     ), "call this method only for mixed precision"
-    model = model.half()
-    # now model and optimizer both point to fp16 weights
+    model = model.to(torch.bfloat16)
+    # now model and optimizer both point to bf16 weights
     # change optimizer to point to fp32 weights
     fp32_params = []
-    fp16_params = []
+    bf16_params = []
     fp32_grads = []
-    fp16_grads = []
+    bf16_grads = []
     for group in optimizer.param_groups:
         for param_no, param in enumerate(group["params"]):
             assert (
-                param.dtype == torch.float16
-            ), "currently does not handle a mix of fp-16/fp-32"
+                param.dtype == torch.bfloat16
+            ), "currently does not handle a mix of bf-16/fp-32"
             if param.requires_grad:
-                fp16_params.append(param)
+                bf16_params.append(param)
                 param.grad = torch.zeros_like(param)
-                fp16_grads.append(param.grad)
+                bf16_grads.append(param.grad)
                 fp32_param = param.detach().float()
                 fp32_params.append(fp32_param)
                 fp32_param.grad = torch.empty_like(fp32_param)
@@ -271,9 +271,9 @@ def _initialize_mixed_precision(
     )  # trick to recast optimizer states
 
     model_params_fp32 = _coalesce_and_reassign(fp32_params)
-    model_params_fp16 = _coalesce_and_reassign(fp16_params)
+    model_params_bf16 = _coalesce_and_reassign(bf16_params)
     model_grads_fp32 = _coalesce_and_reassign(fp32_grads)
-    model_grads_fp16 = _coalesce_and_reassign(fp16_grads)
+    model_grads_bf16 = _coalesce_and_reassign(bf16_grads)
 
     return model, optimizer
 
@@ -285,7 +285,7 @@ def _initialize_full_precision(
     Initialize full precision training - leaves model and optimizer untouched.
     Flattens fp-32 parameters and gradients.
     """
-    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    global model_params_fp32, model_params_bf16, model_grads_fp32, model_grads_bf16
     assert (
         computation_dtype == torch.float32
     ), "call this method only for mixed precision"
@@ -296,7 +296,7 @@ def _initialize_full_precision(
         for param in group["params"]:
             assert (
                 param.dtype == torch.float32
-            ), "currently does not handle a mix of fp-16/fp-32"
+            ), "currently does not handle a mix of bf-16/fp-32"
             if param.requires_grad:
                 fp32_params.append(param)
                 param.grad = torch.empty_like(param)
@@ -304,8 +304,8 @@ def _initialize_full_precision(
 
     model_params_fp32 = _coalesce_and_reassign(fp32_params)
     model_grads_fp32 = _coalesce_and_reassign(fp32_grads)
-    model_grads_fp16 = None
-    model_params_fp16 = None
+    model_grads_bf16 = None
+    model_params_bf16 = None
 
     return model, optimizer
 
@@ -314,9 +314,9 @@ def _initialize_mixed_precision_with_cpu_offload(
     model: torch.nn.Module, optimizer: torch.optim.Optimizer
 ) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
     """
-    Initialize mixed precision. Makes model parameters and gradients fp-16 and
+    Initialize mixed precision. Makes model parameters and gradients bf-16 and
     optimizer parameters as an fp-32 copy. Similar to Apex's O2 mode.
-    Also flattens fp-32/fp-16 parameters and gradients for a bulk
+    Also flattens fp-32/bf-16 parameters and gradients for a bulk
     descaling and all-reduce.
 
     Arguments:
@@ -324,33 +324,33 @@ def _initialize_mixed_precision_with_cpu_offload(
         optimizer: the optimizer for the model
 
     Returns
-        model: modified model object with fp-16 parameters and gradients
+        model: modified model object with bf-16 parameters and gradients
         optimizer : modified optimizer object with fp-32 parameters and gradients
     """
-    global model_params_fp32, model_params_fp16, model_grads_fp32, model_grads_fp16
+    global model_params_fp32, model_params_bf16, model_grads_fp32, model_grads_bf16
     assert (
-        computation_dtype == torch.float16
+        computation_dtype == torch.bfloat16
     ), "CPU offload only supports mixed precision"
-    assert _fp16_all_reduce, "CPU offload only supports fp-16 allreduce"
+    assert _bf16_all_reduce, "CPU offload only supports bf-16 allreduce"
     assert isinstance(
         optimizer, CPUAdam
     ), "only AxoNN's implementation of Adam is supported"
 
-    model = model.half()
-    # now model and optimizer both point to fp16 weights
+    model = model.to(torch.bfloat16)
+    # now model and optimizer both point to bf16 weights
     # change optimizer to point to fp32 weights
     fp32_params = []
-    fp16_params = []
-    fp16_grads = []
+    bf16_params = []
+    bf16_grads = []
     for group in optimizer.param_groups:
         for param_no, param in enumerate(group["params"]):
             assert (
-                param.dtype == torch.float16
-            ), "currently does not handle a mix of fp-16/fp-32"
+                param.dtype == torch.bfloat16
+            ), "currently does not handle a mix of bf-16/fp-32"
             if param.requires_grad:
-                fp16_params.append(param)
+                bf16_params.append(param)
                 param.grad = torch.zeros_like(param)
-                fp16_grads.append(param.grad)
+                bf16_grads.append(param.grad)
                 # create fp32 parameters and move them to cpu
                 fp32_param = param.detach().float().cpu()
                 fp32_params.append(fp32_param)
@@ -361,8 +361,8 @@ def _initialize_mixed_precision_with_cpu_offload(
     )  # trick to recast optimizer states
 
     model_params_fp32 = _coalesce_and_reassign(fp32_params)
-    model_params_fp16 = _coalesce_and_reassign(fp16_params)
-    model_grads_fp16 = _coalesce_and_reassign(fp16_grads)
+    model_params_bf16 = _coalesce_and_reassign(bf16_params)
+    model_grads_bf16 = _coalesce_and_reassign(bf16_grads)
 
     return model, optimizer
 
@@ -377,8 +377,8 @@ def register_model_and_optimizer(model_shard, optimizer):
         user to be registered
         optimizer  (torch.nn.Optim): optimizer object for the model
     """
-    global model, model_params_fp32, model_grads_fp32, model_params_fp16
-    global model_grads_fp16, fp32_optimizer
+    global model, model_params_fp32, model_grads_fp32, model_params_bf16
+    global model_grads_bf16, fp32_optimizer
 
     assert is_initialized
 
@@ -387,10 +387,10 @@ def register_model_and_optimizer(model_shard, optimizer):
         model, optimizer = _initialize_mixed_precision_with_cpu_offload(
             model, optimizer
         )
-        model_params = model_params_fp16
-    elif computation_dtype == torch.float16:
+        model_params = model_params_bf16
+    elif computation_dtype == torch.bfloat16:
         model, optimizer = _initialize_mixed_precision(model, optimizer)
-        model_params = model_params_fp16
+        model_params = model_params_bf16
     else:
         model, optimizer = _initialize_full_precision(model, optimizer)
         model_params = model_params_fp32
@@ -399,8 +399,8 @@ def register_model_and_optimizer(model_shard, optimizer):
         model_params.div_(config.G_data), async_op=False
     )  # sync all parameters across data parallel ranks
 
-    if computation_dtype == torch.float16:
-        model_params_fp32.copy_(model_params_fp16)
+    if computation_dtype == torch.bfloat16:
+        model_params_fp32.copy_(model_params_bf16)
 
     fp32_optimizer = optimizer
     fp32_optimizer.skip_next_step = False
@@ -410,9 +410,9 @@ def register_model_and_optimizer(model_shard, optimizer):
     def modified_step(self):
         if not self.skip_next_step:
             unmodified_step()
-            model_params_fp16.copy_(model_params_fp32)
+            model_params_bf16.copy_(model_params_fp32)
 
-    if computation_dtype == torch.float16 and not _cpu_offload:
+    if computation_dtype == torch.bfloat16 and not _cpu_offload:
         fp32_optimizer.step = types.MethodType(modified_step, fp32_optimizer)
 
     return model, optimizer
@@ -619,7 +619,7 @@ def _calc_loss(microbatch_no, microbatch_labels, mul_factor=1.0, eval_mode=False
     """
     # for cross entropy calculation use float
     loss = criterion(output_tensors_cache[microbatch_no].float(), microbatch_labels)
-    if computation_dtype == torch.float16:
+    if computation_dtype == torch.bfloat16:
         output_tensors_cache[microbatch_no] = (
             mul_factor * loss * loss_scale
         )  # scale up for mixed precision to
@@ -649,7 +649,7 @@ def _backward_pass(output_gradients, microbatch_no):
 
 def _sync_scale(local_overflow):
     global loss_scale, no_overflow_iters, max_scale
-    assert computation_dtype == torch.float16
+    assert computation_dtype == torch.bfloat16
     overflow_np = np.array(int(local_overflow), "i")
     overflow_np_recv = np.array(int(local_overflow), "i")
     MPI.COMM_WORLD.Allreduce(
@@ -697,8 +697,8 @@ def run_batch(
     )
     num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
 
-    if computation_dtype == torch.float16 and batch.dtype == torch.float32:
-        batch = batch.half()
+    if computation_dtype == torch.bfloat16 and batch.dtype == torch.float32:
+        batch = batch.to(torch.bfloat16)
 
     if eval_mode:
         model.eval()
@@ -811,30 +811,30 @@ def _check_nan(tensor):
 def _allreduce_and_descale():
     """
     allreduce and descale the gradients in accoradance with mixed precision
-    semantics. For fp-16_all_reduce mode, we first all-reduce and then descale
+    semantics. For bf-16_all_reduce mode, we first all-reduce and then descale
     to prevent underflow. Note that it is not possible to check for underflow
     so it is absolutely essential to maintain this order. For fp-32 all reduce
     mode, we first descale and then all-reduce. After descaling there cannot
     be underflow so this order is safe and prevents overflow.
     """
-    # at this point for mixed precision we will have unscaled fp-16 gradients
+    # at this point for mixed precision we will have unscaled bf-16 gradients
     # for full precision we will have normal gradients
     with torch.no_grad():
         if computation_dtype == torch.float32:
             comm_handle.allreduce(model_grads_fp32, async_op=False)
         else:
-            if _fp16_all_reduce:
+            if _bf16_all_reduce:
                 # first all reduce then descale to prevent underflow
-                comm_handle.allreduce(model_grads_fp16, async_op=False)
-                model_grads_fp32.copy_(model_grads_fp16)
+                comm_handle.allreduce(model_grads_bf16, async_op=False)
+                model_grads_fp32.copy_(model_grads_bf16)
                 model_grads_fp32.div_(loss_scale)
             else:
                 # first descale then allreduce to precent overflow
-                model_grads_fp32.copy_(model_grads_fp16)
+                model_grads_fp32.copy_(model_grads_bf16)
                 model_grads_fp32.div_(loss_scale)
                 comm_handle.allreduce(model_grads_fp32, async_op=False)
 
-            model_grads_fp16.zero_()
+            model_grads_bf16.zero_()
             local_overflow = _check_nan(model_grads_fp32)
             global_overflow = _sync_scale(local_overflow)
             fp32_optimizer.skip_next_step = global_overflow
