@@ -44,7 +44,8 @@ computation_dtype = None
 # bf16 all reduce, only applicable with mixed precision
 _bf16_all_reduce = None
 # loss_scale
-loss_scale = 2.0**16
+# loss_scale = 2.0**16
+loss_scale = 1
 max_scale = 2.0**24
 min_scale = 2.0**10
 scaling_window = 200
@@ -835,6 +836,7 @@ def _allreduce_and_descale():
                 comm_handle.allreduce(model_grads_fp32, async_op=False)
 
             model_grads_bf16.zero_()
-            local_overflow = _check_nan(model_grads_fp32)
-            global_overflow = _sync_scale(local_overflow)
-            fp32_optimizer.skip_next_step = global_overflow
+            
+            # local_overflow = _check_nan(model_grads_fp32)
+            # global_overflow = _sync_scale(local_overflow)
+            # fp32_optimizer.skip_next_step = global_overflow
