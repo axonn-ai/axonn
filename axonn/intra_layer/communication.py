@@ -3,12 +3,16 @@ import torch
 
 
 def _all_reduce(input_, process_group=None):
-    dist.all_reduce(input_.contiguous(), group=process_group)
+    if dist.get_world_size(process_group) > 1:
+        dist.all_reduce(input_.contiguous(), group=process_group)
     return input_
 
 
 def _drop(input_, dim, process_group=None):
     """Divide a tensor among the tensor parallel ranks"""
+    if dist.get_world_size(process_group) == 1:
+        return input_
+
     total_chunks = dist.get_world_size(process_group)
     this_chunk = dist.get_rank(process_group)
     assert input_.shape[dim] % total_chunks == 0
@@ -19,7 +23,9 @@ def _drop(input_, dim, process_group=None):
 
 def _gather(input_, dim, process_group=None):
     """Gather tensors and concatenate them along a dimension"""
-
+    if dist.get_world_size(process_group) == 1:
+        return input_
+    
     input_ = input_.contiguous()
     # Size and dimension.
     rank = dist.get_rank(process_group)
