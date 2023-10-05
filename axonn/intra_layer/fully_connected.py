@@ -3,14 +3,16 @@ import torch.distributed as dist
 import torch
 from .communication import ForwardAllReduce, BackwardAllReduce, Drop
 
+
 def divide(a, b):
-    assert a%b == 0
-    return a//b
+    assert a % b == 0
+    return a // b
+
 
 @torch.no_grad()
-def initialize_params(out_features, in_features, 
-                      out_features_group, in_features_group, 
-                      init_method):
+def initialize_params(
+    out_features, in_features, out_features_group, in_features_group, init_method
+):
     params = torch.empty((out_features, in_features))
     init_method(params)
     params = Drop.apply(torch.t(params).contiguous(), out_features_group)
@@ -18,10 +20,18 @@ def initialize_params(out_features, in_features,
     params = Drop.apply(params, in_features_group)
     return params
 
+
 class Linear(torch.nn.Module):
-    def __init__(self, in_features, out_features, 
-                 *args, transpose=False, skip_bias_add=False, 
-                 init_method=None, **kwargs):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        *args,
+        transpose=False,
+        skip_bias_add=False,
+        init_method=None,
+        **kwargs
+    ):
         super(Linear, self).__init__()
         self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
         self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
@@ -35,20 +45,26 @@ class Linear(torch.nn.Module):
             self.local_in_features = divide(in_features, self.inner_group_size)
             self.local_out_features = divide(out_features, self.outer_group_size)
             if init_method:
-                initial_params = initialize_params(out_features, 
-                                              in_features, 
-                                              self.outer_group, 
-                                              self.inner_group, init_method)
+                initial_params = initialize_params(
+                    out_features,
+                    in_features,
+                    self.outer_group,
+                    self.inner_group,
+                    init_method,
+                )
         else:
             assert out_features % self.inner_group_size == 0
             assert in_features % self.outer_group_size == 0
             self.local_in_features = divide(in_features, self.outer_group_size)
             self.local_out_features = divide(out_features, self.inner_group_size)
             if init_method:
-                initial_params = initialize_params(out_features, 
-                                              in_features, 
-                                              self.inner_group, 
-                                              self.outer_group, init_method)
+                initial_params = initialize_params(
+                    out_features,
+                    in_features,
+                    self.inner_group,
+                    self.outer_group,
+                    init_method,
+                )
 
         self.linear = torch.nn.Linear(
             in_features=self.local_in_features,
@@ -57,11 +73,15 @@ class Linear(torch.nn.Module):
             **kwargs,
             bias=False
         )
-        
+
         if init_method:
             self.linear.weight.data.copy_(initial_params)
 
-        self.bias = torch.nn.Parameter(torch.zeros(self.local_out_features,))
+        self.bias = torch.nn.Parameter(
+            torch.zeros(
+                self.local_out_features,
+            )
+        )
         self.transpose = transpose
         self.skip_bias_add = skip_bias_add
 

@@ -204,4 +204,3 @@ class communication_handle:
     def broadcast_inter_layer(self, tensor, root):
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         self.p2p_mpi_comm.Bcast(mpi4py_compatible_array, root=root)
-

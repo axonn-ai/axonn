@@ -25,7 +25,7 @@ def _gather(input_, dim, process_group=None):
     """Gather tensors and concatenate them along a dimension"""
     if dist.get_world_size(process_group) == 1:
         return input_
-    
+
     input_ = input_.contiguous()
     # Size and dimension.
     rank = dist.get_rank(process_group)
