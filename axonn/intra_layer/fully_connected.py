@@ -1,7 +1,7 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import ForwardAllReduce, BackwardAllReduce, Drop
+from .communication import ForwardAllReduce, BackwardAllReduce, Drop, Gather
 
 
 def divide(a, b):
@@ -88,21 +88,29 @@ class Linear(torch.nn.Module):
     def get_output_feature_size(self):
         return self.local_out_features
 
-    def forward(self, x):
+    def forward(self, x, scatter_input=True, gather_output=True):
         if not self.transpose:
-            if x.size(-1) == self.local_in_features * self.inner_group_size:
+            if scatter_input:
                 x = Drop.apply(x, self.inner_group)
             x = BackwardAllReduce.apply(x, self.outer_group)
             x = self.linear(x)
             x = ForwardAllReduce.apply(x, self.inner_group)
+            if gather_output:
+                x = Gather.apply(x, self.outer_group)
         else:
-            if x.size(-1) == self.local_in_features * self.outer_group_size:
+            if scatter_input:
                 x = Drop.apply(x, self.outer_group)
             x = BackwardAllReduce.apply(x, self.inner_group)
             x = self.linear(x)
             x = ForwardAllReduce.apply(x, self.outer_group)
+            if gather_output:
+                x = Gather.apply(x, self.inner_group)
+
+        bias = self.bias
+        if gather_output:
+            bias = Gather.apply(self.bias, self.outer_group if not self.transpose else self.inner_group)
 
         if self.skip_bias_add:
-            return x, self.bias
+            return x, bias
         else:
-            return x + self.bias
+            return x + bias
