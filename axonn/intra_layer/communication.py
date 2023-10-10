@@ -73,7 +73,7 @@ class BackwardAllReduce(torch.autograd.Function):
 
 class Drop(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None, dim=-1) :
+    def symbolic(graph, input_, process_group=None, dim=-1):
         return _drop(input_, dim=dim, process_group=process_group)
 
     @staticmethod
@@ -84,7 +84,11 @@ class Drop(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return _gather(grad_output, dim=ctx.dim, process_group=ctx.process_group), None, None
+        return (
+            _gather(grad_output, dim=ctx.dim, process_group=ctx.process_group),
+            None,
+            None,
+        )
 
 
 class Gather(torch.autograd.Function):
@@ -93,11 +97,15 @@ class Gather(torch.autograd.Function):
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
-    def forward(ctx, input_, process_group=None, dim=-1,):
+    def forward(ctx, input_, process_group=None, dim=-1):
         ctx.process_group = process_group
         ctx.dim = dim
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return _drop(grad_output, dim=ctx.dim, process_group=ctx.process_group), None, None
+        return (
+            _drop(grad_output, dim=ctx.dim, process_group=ctx.process_group),
+            None,
+            None,
+        )

@@ -1,5 +1,5 @@
 from .fully_connected import Linear as Tensor_Parallel_Linear  # noqa: F401
-from .conv import Conv2d as Tensor_Parallel_Conv2d # noqa: F401
+from .conv import Conv2d as Tensor_Parallel_Conv2d  # noqa: F401
 from .communication import Drop, Gather
 from axonn import axonn as ax
 
