@@ -1,7 +1,7 @@
 import torch
 from . import config
 import os
-from .axonn import model_params_bf16, model_params_fp32, model
+from .axonn import model_params_float16, model_params_fp32, model
 
 
 def save_model_and_optimizer(model, optimizer, checkpoint_folder):
@@ -29,5 +29,5 @@ def load_optimizer(optimizer, checkpoint_folder):
     optim_path = os.path.join(checkpoint_folder, f"optim_{inter_rank}.pt")
     optimizer.load_state_dict(torch.load(optim_path, map_location="cpu"))
     if model is not None:
-        model_params_bf16.copy_(model_params_fp32)
+        model_params_float16.copy_(model_params_fp32)
     return optimizer
