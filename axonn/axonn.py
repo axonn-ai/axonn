@@ -259,7 +259,7 @@ def _initialize_mixed_precision(
     global model_params_fp32, model_params_float16, model_grads_fp32
     global model_grads_float16
     _assert_16bit("call this method only for mixed precision")
-    model = model.to(torch.bfloat16 if _use_bf16 else torch.float16)
+    model = model.to(computation_dtype)
     # now model and optimizer both point to float16 weights
     # change optimizer to point to fp32 weights
     fp32_params = []
@@ -349,7 +349,7 @@ def _initialize_mixed_precision_with_cpu_offload(
         optimizer, CPUAdam
     ), "only AxoNN's implementation of Adam is supported"
 
-    model = model.to(torch.bfloat16 if _use_bf16 else torch.float16)
+    model = model.to(computation_dtype)
     # now model and optimizer both point to float16 weights
     # change optimizer to point to fp32 weights
     fp32_params = []
