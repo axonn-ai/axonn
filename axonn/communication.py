@@ -204,12 +204,3 @@ class communication_handle:
     def broadcast_inter_layer(self, tensor, root):
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         self.p2p_mpi_comm.Bcast(mpi4py_compatible_array, root=root)
-
-    def get_tensor_model_parallel_rank(self):
-        return self.intra_layer_parallel_rank
-
-    def get_tensor_model_parallel_world_size(self):
-        return self.G_intra
-
-    def get_tensor_model_parallel_group(self):
-        return self.intra_layer_group

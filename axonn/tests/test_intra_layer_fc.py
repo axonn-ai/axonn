@@ -26,11 +26,13 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
     X_local = _drop(
         X, 1, inner_group
     )  # divide colunns of X along the inner tensor group
-    layer = Tensor_Parallel_Linear(in_features=H, out_features=H, bias=False).cuda()
+    layer = Tensor_Parallel_Linear(
+        in_features=H, out_features=H, skip_bias_add=True
+    ).cuda()
 
     with torch.no_grad():
         # parallel FW pass
-        Y_local = layer(X_local)
+        Y_local, _ = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 1, outer_group)
 
         # sequential FW pass
@@ -65,12 +67,14 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
 
     # parallel backward pass
-    layer = Tensor_Parallel_Linear(in_features=H, out_features=H, bias=False).cuda()
+    layer = Tensor_Parallel_Linear(
+        in_features=H, out_features=H, skip_bias_add=True
+    ).cuda()
     X_local = (
         _drop(X, 1, inner_group).detach().clone()
     )  # divide colunns of X along the inner tensor group
     X_local.requires_grad = True
-    Y_local = layer(X_local)
+    Y_local, _ = layer(X_local)
     Y_local_grad = _drop(Y_grad, 1, outer_group)
     Y_local.backward(Y_local_grad)
 
