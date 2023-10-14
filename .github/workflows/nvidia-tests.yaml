@@ -8,12 +8,14 @@ on:
 
 jobs:
   inter-layer:
+    needs: formatting
     runs-on: [ nvidia ]
 
     strategy:
       matrix:
         ginter: [ 1, 2 ]
-        memopt: [ '0', '1' ] 
+        memopt: [ '0', '1' ]
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
@@ -35,7 +37,9 @@ jobs:
 
 
   intra-layer:
+    needs: formatting
     runs-on: [ nvidia ]
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
