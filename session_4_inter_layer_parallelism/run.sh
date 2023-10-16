@@ -32,7 +32,7 @@ G_DATA=$(( 4 / G_INTER ))
 echo ${G_DATA}
 echo ${G_INTER}
 
-cmd="mpirun -np 4 python train_axonn_inter_layer.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.001 --image-size 64 --G-inter ${G_INTER} --G-data ${G_DATA} --micro-batch-size 4 --checkpoint-activations"
+cmd="mpirun -np 4 python train_axonn_inter_layer.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64 --G-inter ${G_INTER} --G-data ${G_DATA} --micro-batch-size 4 --checkpoint-activations"
 
 echo ${cmd}
 eval ${cmd}
