@@ -1,0 +1,16 @@
+name: ci 
+
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ develop ]
+
+
+jobs:
+  formatting:
+    runs-on: [ubuntu-latest]
+    uses: ./.github/workflows/formatting.yaml
+  nvidia-gpu:
+    runs-on: [ nvidia ]
+    uses: ./.github/workflows/nvidia-tests.yaml       
