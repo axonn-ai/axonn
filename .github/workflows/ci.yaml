@@ -12,9 +12,7 @@ concurrency:
 
 jobs:
   formatting:
-    runs-on: [ ubuntu-latest ]
     uses: ./.github/workflows/formatting.yaml
   nvidia-gpu:
     needs:  [ formatting ]
-    runs-on: [ nvidia ]
     uses: ./.github/workflows/nvidia-tests.yaml       
