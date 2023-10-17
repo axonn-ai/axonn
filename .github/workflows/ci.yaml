@@ -6,11 +6,15 @@ on:
   pull_request:
     branches: [ develop ]
 
+concurrency:
+  group: ci-${{github.ref}}-${{github.event.pull_request.number || github.run_number}}
+  cancel-in-progress: true
 
 jobs:
   formatting:
-    runs-on: [ubuntu-latest]
+    runs-on: [ ubuntu-latest ]
     uses: ./.github/workflows/formatting.yaml
   nvidia-gpu:
+    needs:  [ formatting ]
     runs-on: [ nvidia ]
     uses: ./.github/workflows/nvidia-tests.yaml       
