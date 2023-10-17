@@ -15,4 +15,4 @@ jobs:
     uses: ./.github/workflows/formatting.yaml
   nvidia-gpu:
     needs:  [ formatting ]
-    uses: ./.github/workflows/nvidia-tests.yaml       
+    uses: ./.github/workflows/nvidia-rtx-3090-tests.yaml       
