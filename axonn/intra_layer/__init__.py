@@ -1,4 +1,4 @@
-from .fully_connected import Linear as Tensor_Parallel_Linear  # noqa: F401
+from .fully_connected import Linear  # noqa: F401
 from .communication import Drop, Gather
 from axonn import axonn as ax
 

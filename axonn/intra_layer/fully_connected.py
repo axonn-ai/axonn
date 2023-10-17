@@ -108,7 +108,9 @@ class Linear(torch.nn.Module):
 
         bias = self.bias
         if gather_output:
-            bias = Gather.apply(self.bias, self.outer_group if not self.transpose else self.inner_group)
+            bias = Gather.apply(
+                self.bias, self.outer_group if not self.transpose else self.inner_group
+            )
 
         if self.skip_bias_add:
             return x, bias
