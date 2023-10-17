@@ -1,10 +1,12 @@
 name: nvidia-rtx-3090 tests
 
 on:
-  push:
-    branches: [ develop ]
-  pull_request:
-    branches: [ develop ]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: unit_tests-${{github.ref}}-${{github.event.pull_request.number || github.run_number}}
+  cancel-in-progress: true
 
 jobs:
   inter-layer:
@@ -13,7 +15,8 @@ jobs:
     strategy:
       matrix:
         ginter: [ 1, 2 ]
-        memopt: [ '0', '1' ] 
+        memopt: [ '0', '1' ]
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
@@ -36,6 +39,7 @@ jobs:
 
   intra-layer:
     runs-on: [ nvidia ]
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
