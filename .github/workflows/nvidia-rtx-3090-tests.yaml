@@ -1,19 +1,22 @@
 name: nvidia-rtx-3090 tests
 
 on:
-  push:
-    branches: [ develop ]
-  pull_request:
-    branches: [ develop ]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: unit_tests-${{github.ref}}-${{github.event.pull_request.number || github.run_number}}
+  cancel-in-progress: true
 
 jobs:
-  mnist-trainer:
+  inter-layer:
     runs-on: [ nvidia ]
 
     strategy:
       matrix:
         ginter: [ 1, 2 ]
-        memopt: [ '0', '1' ] 
+        memopt: [ '0', '1' ]
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
@@ -28,7 +31,23 @@ jobs:
         export G_data=$(( 2 / G_inter ))
         export memopt=${{ matrix.memopt }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-        mpirun -n 2 pytest --with-mpi 
+        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
+    - name: Uninstall AxoNN
+      run: |
+        pip uninstall --yes axonn
+
+
+  intra-layer:
+    runs-on: [ nvidia ]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install AxoNN
+      run: |
+        pip install -r requirements.txt
+    - name: Run unit intra-layer unit tests 
+      run: |
+        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
