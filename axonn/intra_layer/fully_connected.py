@@ -1,8 +1,9 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import ForwardAllReduce, BackwardAllReduce, Drop, Gather
+import math
 
+from .communication import ForwardAllReduce, BackwardAllReduce, Drop, Gather
 
 def divide(a, b):
     assert a % b == 0
@@ -19,7 +20,6 @@ def initialize_params(
     params = torch.t(params).contiguous()
     params = Drop.apply(params, in_features_group)
     return params
-
 
 class Linear(torch.nn.Module):
     def __init__(
@@ -38,33 +38,35 @@ class Linear(torch.nn.Module):
 
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
-
+        
+        if init_method is None:
+            ## this is the same as pytorch 2.1
+            init_method = lambda weight : torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+        
         if not transpose:
             assert in_features % self.inner_group_size == 0
             assert out_features % self.outer_group_size == 0
             self.local_in_features = divide(in_features, self.inner_group_size)
             self.local_out_features = divide(out_features, self.outer_group_size)
-            if init_method:
-                initial_params = initialize_params(
-                    out_features,
-                    in_features,
-                    self.outer_group,
-                    self.inner_group,
-                    init_method,
-                )
+            initial_params = initialize_params(
+                out_features,
+                in_features,
+                self.outer_group,
+                self.inner_group,
+                init_method,
+            )
         else:
             assert out_features % self.inner_group_size == 0
             assert in_features % self.outer_group_size == 0
             self.local_in_features = divide(in_features, self.outer_group_size)
             self.local_out_features = divide(out_features, self.inner_group_size)
-            if init_method:
-                initial_params = initialize_params(
-                    out_features,
-                    in_features,
-                    self.inner_group,
-                    self.outer_group,
-                    init_method,
-                )
+            initial_params = initialize_params(
+                out_features,
+                in_features,
+                self.inner_group,
+                self.outer_group,
+                init_method,
+            )
 
         self.linear = torch.nn.Linear(
             in_features=self.local_in_features,
@@ -76,6 +78,8 @@ class Linear(torch.nn.Module):
 
         if init_method:
             self.linear.weight.data.copy_(initial_params)
+
+        setattr(self.linear.weight, "is_tensor_parallel", True)
 
         self.bias = torch.nn.Parameter(
             torch.zeros(

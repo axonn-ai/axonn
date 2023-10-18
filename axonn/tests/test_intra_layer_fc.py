@@ -26,8 +26,8 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
     X_local = _drop(
         X, 1, inner_group
     )  # divide colunns of X along the inner tensor group
-    layer = Tensor_Parallel_Linear(
-        in_features=H, out_features=H, skip_bias_add=True
+    layer = Linear(
+        in_features=H, out_features=H, skip_bias_add=True, 
     ).cuda()
 
     with torch.no_grad():

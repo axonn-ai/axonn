@@ -1,5 +1,7 @@
 from .fully_connected import Linear  # noqa: F401
 from .communication import Drop, Gather
+from .gradient_normalization import clip_grad_norm_
+
 from axonn import axonn as ax
 
 
@@ -17,4 +19,5 @@ def gather(x, transpose=False):
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
+
     return Gather.apply(x, group)
