@@ -1,9 +1,9 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import ForwardAllReduce, BackwardAllReduce, Drop
-import torch.distributed as dist
+from .communication import Drop
 from torch.autograd import Function
+
 
 def divide(a, b):
     assert a % b == 0
@@ -24,33 +24,42 @@ def initialize_params(
 
 class AsyncLinear(Function):
     @staticmethod
-    def forward(ctx, input_, weight, 
-                forward_all_reduce_group, 
-                backward_all_reduce_group,
-                backward_comm_async):
+    def forward(
+        ctx,
+        input_,
+        weight,
+        forward_all_reduce_group,
+        backward_all_reduce_group,
+        backward_comm_async,
+    ):
         ctx.save_for_backward(input_, weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.backward_comm_async = backward_comm_async
         output = input_.matmul(weight.t())
-        dist.all_reduce(output, 
-                            group=forward_all_reduce_group,
-                            async_op=False)
+        dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         input_, weight = ctx.saved_tensors
-        handle=None
+        handle = None
         if ctx.needs_input_grad[0]:
             grad_input = grad_output.matmul(weight)
-            handle = dist.all_reduce(grad_input, 
-                            group=ctx.backward_all_reduce_group,
-                            async_op=ctx.backward_comm_async)
+            handle = dist.all_reduce(
+                grad_input,
+                group=ctx.backward_all_reduce_group,
+                async_op=ctx.backward_comm_async,
+            )
         if ctx.needs_input_grad[1]:
-            grad_weight = grad_output.view(-1, grad_output.shape[-1]).t().mm(input_.view(-1, input_.shape[-1]))
+            grad_weight = (
+                grad_output.view(-1, grad_output.shape[-1])
+                .t()
+                .mm(input_.view(-1, input_.shape[-1]))
+            )
         if handle and ctx.backward_comm_async:
             handle.wait()
         return grad_input, grad_weight, None, None, None
+
 
 class Linear(torch.nn.Module):
     def __init__(
@@ -112,9 +121,13 @@ class Linear(torch.nn.Module):
 
     def forward(self, x):
         if not self.transpose:
-            x = AsyncLinear.apply(x, self.weight, self.inner_group, self.outer_group, True)
+            x = AsyncLinear.apply(
+                x, self.weight, self.inner_group, self.outer_group, True
+            )
         else:
-            x = AsyncLinear.apply(x, self.weight, self.outer_group, self.inner_group, True)
+            x = AsyncLinear.apply(
+                x, self.weight, self.outer_group, self.inner_group, True
+            )
         if self.skip_bias_add:
             return x, self.bias
         else:
