@@ -62,17 +62,16 @@ class Conv2d(torch.nn.Module):
             )
             self.conv.weight.data.copy_(initial_params)
 
-        self.skip_bias_add = skip_bias_add
+        self.bias = torch.nn.Parameter(torch.zeros(self.out_channels))
 
-        if not self.skip_bias_add:
-            self.bias = torch.nn.Parameter(torch.zeros(self.out_channels))
+        self.skip_bias_add = skip_bias_add
 
     def forward(self, x):
         x = BackwardAllReduce.apply(x, self.outer_group)
         h = self.conv(x)
         h = ForwardAllReduce.apply(h, self.inner_group)
         if self.skip_bias_add:
-            return h
+            return h, self.bias
         else:
             return h + self.bias.view(1, -1, 1, 1)
         return h
