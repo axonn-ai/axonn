@@ -2,10 +2,7 @@ import torch
 import pytest
 from axonn import axonn as ax
 from axonn.intra_layer.communication import _drop, _gather
-from axonn.intra_layer import Tensor_Parallel_Conv2d, drop, gather
-
-torch.use_deterministic_algorithms(True)
-torch.backends.cudnn.benchmark = False
+from axonn.intra_layer import Tensor_Parallel_Conv2d
 
 
 @pytest.mark.mpi
@@ -14,6 +11,13 @@ torch.backends.cudnn.benchmark = False
 def test_fw_pass(G_intra_r, G_intra_c, H, W, C):
     # These tests are in fp-32
     torch.manual_seed(42)
+    # Need to remove all non-determinism from convolutions
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    # This is required because TF32 cores only look at the first 10 bits of mantissa
+    torch.backends.cudnn.allow_tf32 = False
+
     ax.init(
         G_data=1,
         G_inter=1,
@@ -30,10 +34,7 @@ def test_fw_pass(G_intra_r, G_intra_c, H, W, C):
         X, 1, inner_group
     )  # divide channels of X along the inner tensor group
     layer = Tensor_Parallel_Conv2d(
-        in_channels=C,
-        out_channels=2 * C,
-        kernel_size=5,
-        skip_bias_add=True
+        in_channels=C, out_channels=2 * C, kernel_size=5, skip_bias_add=True
     ).cuda()
 
     with torch.no_grad():
@@ -62,7 +63,14 @@ def test_fw_pass(G_intra_r, G_intra_c, H, W, C):
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
 def test_bw_pass(G_intra_r, G_intra_c, H, W, C):
     # These tests are in fp-32
+    # Need to remove all non-determinism from convolutions
     torch.manual_seed(42)
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    # This is required because TF32 cores only look at the first 10 bits of mantissa
+    torch.backends.cudnn.allow_tf32 = False
+
     ax.init(
         G_data=1,
         G_inter=1,
@@ -77,13 +85,10 @@ def test_bw_pass(G_intra_r, G_intra_c, H, W, C):
 
     # parallel backward pass
     layer = Tensor_Parallel_Conv2d(
-        in_channels= C,
-        out_channels=2 * C,
-        kernel_size=5,
-        skip_bias_add=True
+        in_channels=C, out_channels=2 * C, kernel_size=5, skip_bias_add=True
     ).cuda()
     X_local = (
-       _drop(X, 1, inner_group).detach().clone()
+        _drop(X, 1, inner_group).detach().clone()
     )  # divide input channels of X along the inner tensor group
     X_local.requires_grad = True
     Y_local, _ = layer(X_local)
@@ -107,12 +112,6 @@ def test_bw_pass(G_intra_r, G_intra_c, H, W, C):
     Y_sequential.backward(Y_grad)
 
     X_grad_parallel = _gather(X_local.grad, 1, inner_group)
-    torch.set_printoptions(threshold=10000)
-    #print (X_grad_parallel)
-    #print (X.grad)
-
-    #print (torch.allclose(
-    #    X_grad_parallel, X.grad))
 
     assert torch.allclose(
         X_grad_parallel, X.grad
@@ -124,5 +123,3 @@ def test_bw_pass(G_intra_r, G_intra_c, H, W, C):
     assert torch.allclose(
         weight_grad_parallel, layer_sequential.weight.grad
     ), "BW Pass - gradients of weight do not match"
-
-test_bw_pass(1,2,64,64,4)
