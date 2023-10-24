@@ -40,7 +40,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
             in_features=H, out_features=H, bias=False
         ).cuda()
         weight_sequential = _gather(
-            _gather(layer.linear.weight, 1, inner_group), 0, outer_group
+            _gather(layer.weight, 1, inner_group), 0, outer_group
         )
         layer_sequential.weight.copy_(weight_sequential)
         Y_sequential = layer_sequential(X)
@@ -86,7 +86,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H, async_comm_in_backward_pass):
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=False).cuda()
     with torch.no_grad():
         weight_sequential = _gather(
-            _gather(layer.linear.weight, 1, inner_group), 0, outer_group
+            _gather(layer.weight, 1, inner_group), 0, outer_group
         )
         layer_sequential.weight.copy_(weight_sequential)
     X.requires_grad = True
@@ -99,7 +99,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H, async_comm_in_backward_pass):
     ), "BW Pass - gradients of input do not match"
 
     weight_grad_parallel = _gather(
-        _gather(layer.linear.weight.grad, 1, inner_group), 0, outer_group
+        _gather(layer.weight.grad, 1, inner_group), 0, outer_group
     )
     assert torch.allclose(
         weight_grad_parallel, layer_sequential.weight.grad
