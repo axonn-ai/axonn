@@ -3,6 +3,7 @@ import torch.distributed as dist
 import torch
 from .communication import Drop
 from torch.autograd import Function
+import math
 
 
 def divide(a, b):
@@ -61,6 +62,10 @@ class AsyncLinear(Function):
         return grad_input, grad_weight, None, None, None
 
 
+def default_init_method(weight):
+    return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+
+
 class Linear(torch.nn.Module):
     def __init__(
         self,
@@ -70,7 +75,7 @@ class Linear(torch.nn.Module):
         transpose=False,
         skip_bias_add=False,
         init_method=None,
-        async_comm_in_backward_pass=True
+        async_comm_in_backward_pass=True,
         **kwargs
     ):
         super(Linear, self).__init__()
@@ -79,10 +84,10 @@ class Linear(torch.nn.Module):
 
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
-        self.async_comm_in_backward_pass=async_comm_in_backward_pass
+        self.async_comm_in_backward_pass = async_comm_in_backward_pass
 
         if init_method is None:
-             init_method = lambda weight : torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+            init_method = default_init_method
 
         if not transpose:
             assert in_features % self.inner_group_size == 0
@@ -125,11 +130,19 @@ class Linear(torch.nn.Module):
     def forward(self, x):
         if not self.transpose:
             x = AsyncLinear.apply(
-                x, self.weight, self.inner_group, self.outer_group, self.async_comm_in_backward_pass
+                x,
+                self.weight,
+                self.inner_group,
+                self.outer_group,
+                self.async_comm_in_backward_pass,
             )
         else:
             x = AsyncLinear.apply(
-                x, self.weight, self.outer_group, self.inner_group, self.async_comm_in_backward_pass
+                x,
+                self.weight,
+                self.outer_group,
+                self.inner_group,
+                self.async_comm_in_backward_pass,
             )
         if self.skip_bias_add:
             return x, self.bias
