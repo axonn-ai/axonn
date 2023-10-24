@@ -40,7 +40,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
             in_features=H, out_features=H, bias=False
         ).cuda()
         weight_sequential = _gather(
-            _gather(layer.linear.weight, 1, inner_group), 0, outer_group
+            _gather(layer.weight, 1, inner_group), 0, outer_group
         )
         layer_sequential.weight.copy_(weight_sequential)
         Y_sequential = layer_sequential(X)
@@ -51,7 +51,8 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H):
 @pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
-def test_bw_pass(G_intra_r, G_intra_c, B, H):
+@pytest.mark.parametrize("async_comm_in_backward_pass", [True, False])
+def test_bw_pass(G_intra_r, G_intra_c, B, H, async_comm_in_backward_pass):
     # These tests are in fp-32
     torch.manual_seed(42)
     ax.init(
@@ -68,7 +69,10 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
 
     # parallel backward pass
     layer = Tensor_Parallel_Linear(
-        in_features=H, out_features=H, skip_bias_add=True
+        in_features=H,
+        out_features=H,
+        skip_bias_add=True,
+        async_comm_in_backward_pass=async_comm_in_backward_pass,
     ).cuda()
     X_local = (
         _drop(X, 1, inner_group).detach().clone()
@@ -82,7 +86,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=False).cuda()
     with torch.no_grad():
         weight_sequential = _gather(
-            _gather(layer.linear.weight, 1, inner_group), 0, outer_group
+            _gather(layer.weight, 1, inner_group), 0, outer_group
         )
         layer_sequential.weight.copy_(weight_sequential)
     X.requires_grad = True
@@ -95,7 +99,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H):
     ), "BW Pass - gradients of input do not match"
 
     weight_grad_parallel = _gather(
-        _gather(layer.linear.weight.grad, 1, inner_group), 0, outer_group
+        _gather(layer.weight.grad, 1, inner_group), 0, outer_group
     )
     assert torch.allclose(
         weight_grad_parallel, layer_sequential.weight.grad
