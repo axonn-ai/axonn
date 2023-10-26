@@ -45,9 +45,12 @@ jobs:
     - name: Install AxoNN
       run: |
         pip install -r requirements.txt
-    - name: Run unit intra-layer unit tests 
+    - name: Run intra-layer FC unit tests 
       run: |
         mpirun -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
+    - name: Run intra-layer Conv unit tests 
+      run: |
+        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_conv.py 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
