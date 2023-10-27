@@ -25,7 +25,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H, easy_tp):
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
 
     if not easy_tp:
-        ## manually divide input
+        # manually divide input
         X_local = _drop(
             X, 1, inner_group
         )  # divide colunns of X along the inner tensor group
@@ -41,7 +41,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H, easy_tp):
     with torch.no_grad():
         # parallel FW pass
         Y_local, _ = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
-        if not easy_tp: ## gather output manually
+        if not easy_tp:  # gather output manually
             Y_parallel = _gather(Y_local.clone(), 1, outer_group)
         else:
             Y_parallel = Y_local
@@ -85,7 +85,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H, async_comm_in_backward_pass, easy_t
         skip_bias_add=True,
         async_comm_in_backward_pass=async_comm_in_backward_pass,
     ).cuda()
-    
+
     if not easy_tp:
         X_local = (
             _drop(X, 1, inner_group).detach().clone()
@@ -95,7 +95,7 @@ def test_bw_pass(G_intra_r, G_intra_c, B, H, async_comm_in_backward_pass, easy_t
 
     X_local.requires_grad = True
     Y_local, _ = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
-    
+
     if not easy_tp:
         Y_local_grad = _drop(Y_grad, 1, outer_group)
     else:

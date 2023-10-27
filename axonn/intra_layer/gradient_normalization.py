@@ -4,6 +4,7 @@ import torch.distributed as dist
 
 from axonn import axonn as ax
 
+
 def get_total_norm(tensors, norm_type, error_if_nonfinite):
     if len(tensors) == 0:
         return torch.tensor(0.0)
