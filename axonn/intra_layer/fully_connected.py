@@ -3,6 +3,7 @@ import torch.distributed as dist
 import torch
 from .communication import Drop, Gather
 from torch.autograd import Function
+from torch.cuda.amp import custom_fwd, custom_bwd
 import math
 
 def divide(a, b):
@@ -23,6 +24,7 @@ def initialize_params(
 
 class AsyncLinear(Function):
     @staticmethod
+    @custom_fwd
     def forward(
         ctx,
         input_,
@@ -39,6 +41,7 @@ class AsyncLinear(Function):
         return output
 
     @staticmethod
+    @custom_bwd
     def backward(ctx, grad_output):
         input_, weight = ctx.saved_tensors
         handle = None
@@ -116,7 +119,7 @@ class Linear(torch.nn.Module):
 
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
-        setattr(self.linear.weight, "is_tensor_parallel", True)
+        setattr(self.weight, "is_tensor_parallel", True)
 
         self.bias = torch.nn.Parameter(
             torch.zeros(
