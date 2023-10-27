@@ -2,7 +2,7 @@ from .fully_connected import Linear  # noqa: F401
 from .conv import Conv2d as Tensor_Parallel_Conv2d  # noqa: F401
 
 from .communication import Drop, Gather
-from .gradient_normalization import clip_grad_norm_
+from .gradient_normalization import clip_grad_norm_  # noqa: F401
 
 from axonn import axonn as ax
 

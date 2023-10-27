@@ -6,6 +6,7 @@ from torch.autograd import Function
 from torch.cuda.amp import custom_fwd, custom_bwd
 import math
 
+
 def divide(a, b):
     assert a % b == 0
     return a // b
@@ -21,6 +22,7 @@ def initialize_params(
     params = torch.t(params).contiguous()
     params = Drop.apply(params, in_features_group)
     return params
+
 
 class AsyncLinear(Function):
     @staticmethod
@@ -116,7 +118,6 @@ class Linear(torch.nn.Module):
                 init_method,
             )
 
-
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
         setattr(self.weight, "is_tensor_parallel", True)
@@ -157,7 +158,7 @@ class Linear(torch.nn.Module):
             )
             if gather_output:
                 x = Gather.apply(x, self.inner_group)
-            
+
         bias = self.bias
         if gather_output:
             bias = Gather.apply(
