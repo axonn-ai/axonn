@@ -1,5 +1,9 @@
 import torch
-from torch._six import inf
+
+try:
+    from torch._six import inf
+except ImportError:
+    from torch import inf
 import torch.distributed as dist
 
 from axonn import axonn as ax
