@@ -5,7 +5,6 @@ from .communication import Drop, Gather
 from torch.autograd import Function
 from torch.cuda.amp import custom_fwd, custom_bwd
 import math
-import itertools
 
 
 def divide(a, b):
@@ -86,6 +85,7 @@ class Linear(torch.nn.Module):
         out_features,
         *args,
         transpose=False,
+        bias=True,
         skip_bias_add=False,
         init_method=None,
         async_comm_in_backward_pass=True,
@@ -135,11 +135,15 @@ class Linear(torch.nn.Module):
 
         setattr(self.weight, "is_tensor_parallel", True)
 
-        self.bias = torch.nn.Parameter(
-            torch.zeros(
-                self.local_out_features,
+        if bias:
+            self.bias = torch.nn.Parameter(
+                torch.zeros(
+                    self.local_out_features,
+                )
             )
-        )
+        else:
+            self.bias = None
+
         self.transpose = transpose
         self.skip_bias_add = skip_bias_add
         self._old_load_from_state_dict = self._load_from_state_dict
@@ -174,27 +178,19 @@ class Linear(torch.nn.Module):
             if gather_output:
                 x = Gather.apply(x, self.inner_group)
 
-        bias = self.bias
-        if gather_output:
-            bias = Gather.apply(
-                self.bias, self.outer_group if not self.transpose else self.inner_group
-            )
-        if self.skip_bias_add:
-            return x, bias
+        if self.bias is None:
+            return x
         else:
-            return x + bias
-
-    def _get_keys_for_state_dict(self, prefix):
-        persistent_buffers = {
-            k: v
-            for k, v in self._buffers.items()
-            if k not in self._non_persistent_buffers_set
-        }
-        local_name_params = itertools.chain(
-            self._parameters.items(), persistent_buffers.items()
-        )
-        local_state = {k: v for k, v in local_name_params if v is not None}
-        return [prefix + name for name, param in local_state.items()]
+            bias = self.bias
+            if gather_output:
+                bias = Gather.apply(
+                    self.bias,
+                    self.outer_group if not self.transpose else self.inner_group,
+                )
+            if self.skip_bias_add:
+                return x, bias
+            else:
+                return x + bias
 
     def _is_full_weight_matrix(self, weight):
         return (weight.size(0) == self.out_features) and (
@@ -208,29 +204,43 @@ class Linear(torch.nn.Module):
 
     @torch.no_grad()
     def _modified_load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
-        keys = self._get_keys_for_state_dict(prefix)
         # this is very brittle at the moment
         # if the weight or bias is missing from the state dict this will error
-        weight, bias = state_dict[keys[0]], state_dict[keys[1]]
-        is_full_weight_matrix = self._is_full_weight_matrix(weight)
-        is_sharded_weight_matrix = self._is_sharded_weight_matrix(weight)
+        weight = (
+            state_dict[prefix + "weight"] if prefix + "weight" in state_dict else None
+        )
 
-        assert (
-            is_full_weight_matrix or is_sharded_weight_matrix
-        ), "This is neither a full checkpoint or a sharded checkpoint"
+        if weight is not None:
+            is_full_weight_matrix = self._is_full_weight_matrix(weight)
+            is_sharded_weight_matrix = self._is_sharded_weight_matrix(weight)
 
-        if is_full_weight_matrix:
-            out_features_group, in_features_group = self.outer_group, self.inner_group
-            if self.transpose:
+            assert (
+                is_full_weight_matrix or is_sharded_weight_matrix
+            ), "This is neither a full checkpoint or a sharded checkpoint"
+
+            if is_full_weight_matrix:
                 out_features_group, in_features_group = (
-                    self.inner_group,
                     self.outer_group,
+                    self.inner_group,
                 )
-            weight = extract_local_params_from_full_params(
-                weight, out_features_group, in_features_group
+                if self.transpose:
+                    out_features_group, in_features_group = (
+                        self.inner_group,
+                        self.outer_group,
+                    )
+                weight = extract_local_params_from_full_params(
+                    weight, out_features_group, in_features_group
+                )
+                state_dict[prefix + "weight"] = weight
+
+        if self.bias is not None:
+            bias = (
+                state_dict[prefix + "bias"] if prefix + "bias" in state_dict else None
             )
-            bias = Drop.apply(bias, out_features_group)
-            state_dict[keys[0]] = weight
-            state_dict[keys[1]] = bias
+            if bias is not None:
+                bias = Drop.apply(
+                    bias, self.outer_group if not self.transpose else self.inner_group
+                )
+                state_dict[prefix + "bias"] = bias
 
         self._old_load_from_state_dict(state_dict, prefix, *args, **kwargs)
