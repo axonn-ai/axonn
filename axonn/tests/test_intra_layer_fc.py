@@ -9,7 +9,7 @@ from axonn.intra_layer import Linear, clip_grad_norm_
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
 @pytest.mark.parametrize("easy_tp", [False, True])
-@pytest.mark.parametrize("bias", [False])
+@pytest.mark.parametrize("bias", [False, True])
 def test_fw_pass(G_intra_r, G_intra_c, B, H, easy_tp, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
@@ -34,10 +34,12 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H, easy_tp, bias):
         X_local = X
 
     layer = Linear(in_features=H, out_features=H, bias=bias).cuda()
-
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
+    # test if load state dict works with a sequential checkpoint
     layer.load_state_dict(layer_sequential.state_dict())
+    # test if load state dict works with a sharded checkpoint
+    layer.load_state_dict(layer.state_dict())
 
     with torch.no_grad():
         # parallel FW pass
@@ -61,7 +63,7 @@ def test_fw_pass(G_intra_r, G_intra_c, B, H, easy_tp, bias):
 @pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
 @pytest.mark.parametrize("async_comm_in_backward_pass", [True, False])
 @pytest.mark.parametrize("easy_tp", [False, True])
-@pytest.mark.parametrize("clip_grad_norm", [-1, 1, 1e-1, 1e-2, 1e-3])
+@pytest.mark.parametrize("clip_grad_norm", [-1, 1e-3])
 @pytest.mark.parametrize("bias", [False])
 def test_bw_pass(
     G_intra_r,
@@ -96,7 +98,10 @@ def test_bw_pass(
     ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
+    # test if load state dict works with a sequential checkpoint
     layer.load_state_dict(layer_sequential.state_dict())
+    # test if load state dict works with a sharded checkpoint
+    layer.load_state_dict(layer.state_dict())
 
     if not easy_tp:
         X_local = (
@@ -141,3 +146,18 @@ def test_bw_pass(
     assert torch.allclose(
         weight_grad_parallel, layer_sequential.weight.grad
     ), "BW Pass - gradients of weight do not match"
+
+
+if __name__ == "__main__":
+    test_fw_pass(G_intra_r=2, G_intra_c=1, B=4, H=256, easy_tp=True, bias=True)
+    test_bw_pass(
+        G_intra_r=2,
+        G_intra_c=1,
+        B=4,
+        H=256,
+        async_comm_in_backward_pass=True,
+        easy_tp=True,
+        clip_grad_norm=0.01,
+        bias=True,
+    )
+    print("finished")

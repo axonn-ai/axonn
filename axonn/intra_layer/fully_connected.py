@@ -134,6 +134,11 @@ class Linear(torch.nn.Module):
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
         setattr(self.weight, "is_tensor_parallel", True)
+        setattr(
+            self.weight,
+            "process_group_for_norm_reduction",
+            ax.comm_handle.intra_layer_group,
+        )
 
         if bias:
             self.bias = torch.nn.Parameter(
@@ -141,6 +146,19 @@ class Linear(torch.nn.Module):
                     self.local_out_features,
                 )
             )
+            setattr(self.bias, "is_tensor_parallel", True)
+            if not transpose:
+                setattr(
+                    self.bias,
+                    "process_group_for_norm_reduction",
+                    ax.comm_handle.outer_intra_layer_parallel_group,
+                )
+            else:
+                setattr(
+                    self.bias,
+                    "process_group_for_norm_reduction",
+                    ax.comm_handle.inner_intra_layer_parallel_group,
+                )
         else:
             self.bias = None
 
@@ -204,8 +222,6 @@ class Linear(torch.nn.Module):
 
     @torch.no_grad()
     def _modified_load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
-        # this is very brittle at the moment
-        # if the weight or bias is missing from the state dict this will error
         weight = (
             state_dict[prefix + "weight"] if prefix + "weight" in state_dict else None
         )
@@ -216,7 +232,7 @@ class Linear(torch.nn.Module):
 
             assert (
                 is_full_weight_matrix or is_sharded_weight_matrix
-            ), "This is neither a full checkpoint or a sharded checkpoint"
+            ), "This is neither a full checkpoint nor a sharded checkpoint"
 
             if is_full_weight_matrix:
                 out_features_group, in_features_group = (
@@ -238,9 +254,15 @@ class Linear(torch.nn.Module):
                 state_dict[prefix + "bias"] if prefix + "bias" in state_dict else None
             )
             if bias is not None:
-                bias = Drop.apply(
-                    bias, self.outer_group if not self.transpose else self.inner_group
-                )
-                state_dict[prefix + "bias"] = bias
+                if bias.size(0) == self.out_features:
+                    bias = Drop.apply(
+                        bias,
+                        self.outer_group if not self.transpose else self.inner_group,
+                    )
+                    state_dict[prefix + "bias"] = bias
+                else:
+                    assert (
+                        bias.size(0) == self.local_out_features
+                    ), "This is neither a full checkpoint nor a sharded checkpoint"
 
         self._old_load_from_state_dict(state_dict, prefix, *args, **kwargs)
