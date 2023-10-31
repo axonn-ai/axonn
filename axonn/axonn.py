@@ -97,6 +97,7 @@ def init(
     G_data: int,
     G_intra_r: int = 1,
     G_intra_c: int = 1,
+    G_intra_d: int = 1,
     gpus_per_node: Optional[int] = None,
     mixed_precision=False,
     fp16_allreduce=True,
@@ -125,13 +126,14 @@ def init(
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
     comm_handle = communication_handle(
-        G_inter, G_data, G_intra_r, G_intra_c, gpus_per_node
+        G_inter, G_data, G_intra_r, G_intra_c, G_intra_d, gpus_per_node=gpus_per_node
     )
     config.G_inter = G_inter
     config.G_data = G_data
-    config.G_intra = G_intra_r * G_intra_c
+    config.G_intra = G_intra_r * G_intra_c * G_intra_d
     config.G_intra_r = G_intra_r
     config.G_intra_c = G_intra_c
+    config.G_intra_d = G_intra_d
     config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
     config.data_parallel_rank = comm_handle.data_parallel_rank
     config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
