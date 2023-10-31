@@ -147,6 +147,12 @@ def test_bw_pass(
         weight_grad_parallel, layer_sequential.weight.grad
     ), "BW Pass - gradients of weight do not match"
 
+    if bias:
+        bias_grad_parallel = _gather(layer.bias.grad, 0, outer_group)
+        assert torch.allclose(
+            bias_grad_parallel, layer_sequential.bias.grad
+        ), "BW Pass - gradients of bias do not match"
+
 
 if __name__ == "__main__":
     test_fw_pass(G_intra_r=2, G_intra_c=1, B=4, H=256, easy_tp=True, bias=True)
