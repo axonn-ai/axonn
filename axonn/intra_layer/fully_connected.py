@@ -1,8 +1,9 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import Drop
+from .communication import Drop, Gather
 from torch.autograd import Function
+from torch.cuda.amp import custom_fwd, custom_bwd
 import math
 
 
@@ -11,20 +12,34 @@ def divide(a, b):
     return a // b
 
 
+def extract_local_params_from_full_params(
+    full_params, out_features_group, in_features_group
+):
+    params = Drop.apply(torch.t(full_params).contiguous(), out_features_group)
+    params = torch.t(params).contiguous()
+    params = Drop.apply(params, in_features_group)
+    return params
+
+
 @torch.no_grad()
 def initialize_params(
     out_features, in_features, out_features_group, in_features_group, init_method
 ):
     params = torch.empty((out_features, in_features))
     init_method(params)
-    params = Drop.apply(torch.t(params).contiguous(), out_features_group)
-    params = torch.t(params).contiguous()
-    params = Drop.apply(params, in_features_group)
+    params = extract_local_params_from_full_params(
+        params, out_features_group, in_features_group
+    )
     return params
+
+
+def default_init_method(weight):
+    return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
 
 
 class AsyncLinear(Function):
     @staticmethod
+    @custom_fwd
     def forward(
         ctx,
         input_,
@@ -41,6 +56,7 @@ class AsyncLinear(Function):
         return output
 
     @staticmethod
+    @custom_bwd
     def backward(ctx, grad_output):
         input_, weight = ctx.saved_tensors
         handle = None
@@ -53,17 +69,13 @@ class AsyncLinear(Function):
             )
         if ctx.needs_input_grad[1]:
             grad_weight = (
-                grad_output.view(-1, grad_output.shape[-1])
+                grad_output.reshape(-1, grad_output.shape[-1])
                 .t()
                 .mm(input_.view(-1, input_.shape[-1]))
             )
         if handle and ctx.backward_comm_async:
             handle.wait()
         return grad_input, grad_weight, None, None, None
-
-
-def default_init_method(weight):
-    return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
 
 
 class Linear(torch.nn.Module):
@@ -73,6 +85,7 @@ class Linear(torch.nn.Module):
         out_features,
         *args,
         transpose=False,
+        bias=True,
         skip_bias_add=False,
         init_method=None,
         async_comm_in_backward_pass=True,
@@ -84,6 +97,10 @@ class Linear(torch.nn.Module):
 
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
+
+        self.in_features = in_features
+        self.out_features = out_features
+
         self.async_comm_in_backward_pass = async_comm_in_backward_pass
 
         if init_method is None:
@@ -116,19 +133,47 @@ class Linear(torch.nn.Module):
 
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
-        self.bias = torch.nn.Parameter(
-            torch.zeros(
-                self.local_out_features,
-            )
+        setattr(self.weight, "is_tensor_parallel", True)
+        setattr(
+            self.weight,
+            "process_group_for_norm_reduction",
+            ax.comm_handle.intra_layer_group,
         )
+
+        if bias:
+            self.bias = torch.nn.Parameter(
+                torch.zeros(
+                    self.local_out_features,
+                )
+            )
+            setattr(self.bias, "is_tensor_parallel", True)
+            if not transpose:
+                setattr(
+                    self.bias,
+                    "process_group_for_norm_reduction",
+                    ax.comm_handle.outer_intra_layer_parallel_group,
+                )
+            else:
+                setattr(
+                    self.bias,
+                    "process_group_for_norm_reduction",
+                    ax.comm_handle.inner_intra_layer_parallel_group,
+                )
+        else:
+            self.bias = None
+
         self.transpose = transpose
         self.skip_bias_add = skip_bias_add
+        self._old_load_from_state_dict = self._load_from_state_dict
+        self._load_from_state_dict = self._modified_load_from_state_dict
 
     def get_output_feature_size(self):
         return self.local_out_features
 
-    def forward(self, x):
+    def forward(self, x, scatter_input=True, gather_output=True):
         if not self.transpose:
+            if scatter_input:
+                x = Drop.apply(x, self.inner_group)
             x = AsyncLinear.apply(
                 x,
                 self.weight,
@@ -136,7 +181,11 @@ class Linear(torch.nn.Module):
                 self.outer_group,
                 self.async_comm_in_backward_pass,
             )
+            if gather_output:
+                x = Gather.apply(x, self.outer_group)
         else:
+            if scatter_input:
+                x = Drop.apply(x, self.outer_group)
             x = AsyncLinear.apply(
                 x,
                 self.weight,
@@ -144,7 +193,76 @@ class Linear(torch.nn.Module):
                 self.inner_group,
                 self.async_comm_in_backward_pass,
             )
-        if self.skip_bias_add:
-            return x, self.bias
+            if gather_output:
+                x = Gather.apply(x, self.inner_group)
+
+        if self.bias is None:
+            return x
         else:
-            return x + self.bias
+            bias = self.bias
+            if gather_output:
+                bias = Gather.apply(
+                    self.bias,
+                    self.outer_group if not self.transpose else self.inner_group,
+                )
+            if self.skip_bias_add:
+                return x, bias
+            else:
+                return x + bias
+
+    def _is_full_weight_matrix(self, weight):
+        return (weight.size(0) == self.out_features) and (
+            weight.size(1) == self.in_features
+        )
+
+    def _is_sharded_weight_matrix(self, weight):
+        return (weight.size(0) == self.local_out_features) and (
+            weight.size(1) == self.local_in_features
+        )
+
+    @torch.no_grad()
+    def _modified_load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        weight = (
+            state_dict[prefix + "weight"] if prefix + "weight" in state_dict else None
+        )
+
+        if weight is not None:
+            is_full_weight_matrix = self._is_full_weight_matrix(weight)
+            is_sharded_weight_matrix = self._is_sharded_weight_matrix(weight)
+
+            assert (
+                is_full_weight_matrix or is_sharded_weight_matrix
+            ), "This is neither a full checkpoint nor a sharded checkpoint"
+
+            if is_full_weight_matrix:
+                out_features_group, in_features_group = (
+                    self.outer_group,
+                    self.inner_group,
+                )
+                if self.transpose:
+                    out_features_group, in_features_group = (
+                        self.inner_group,
+                        self.outer_group,
+                    )
+                weight = extract_local_params_from_full_params(
+                    weight, out_features_group, in_features_group
+                )
+                state_dict[prefix + "weight"] = weight
+
+        if self.bias is not None:
+            bias = (
+                state_dict[prefix + "bias"] if prefix + "bias" in state_dict else None
+            )
+            if bias is not None:
+                if bias.size(0) == self.out_features:
+                    bias = Drop.apply(
+                        bias,
+                        self.outer_group if not self.transpose else self.inner_group,
+                    )
+                    state_dict[prefix + "bias"] = bias
+                else:
+                    assert (
+                        bias.size(0) == self.local_out_features
+                    ), "This is neither a full checkpoint nor a sharded checkpoint"
+
+        self._old_load_from_state_dict(state_dict, prefix, *args, **kwargs)
