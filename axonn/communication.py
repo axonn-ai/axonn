@@ -6,7 +6,7 @@
 import os
 try:
     from mpi4py import MPI
-    MPI4PY_IS_AVAILABLE=False
+    MPI4PY_IS_AVAILABLE=True
 except ImportError:
     MPI4PY_IS_AVAILABLE=False
 import torch
