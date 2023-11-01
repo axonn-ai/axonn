@@ -40,7 +40,8 @@ class communication_handle:
         G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
             G_inter * G_data * G_intra == self.world_size
-        ), f"The product of G_inter, G_intra_r, G_intra_c, G_intra_d, G_data should be equal to the number of GPUs - {self.world_size}"
+        ), "The product of G_inter, G_intra_r, G_intra_c, G_intra_d,"
+        f"G_data should be equal to the number of GPUs - {self.world_size}"
         self.G_intra = G_intra
         self.G_inter = G_inter
         self.G_data = G_data
@@ -124,9 +125,8 @@ class communication_handle:
                 ).reshape(G_intra_d, G_intra_r, G_intra_c)
                 # form row and column tensor parallel groups
                 # G_intra_d x G_intra_r x G_intra_c
-                intra_layer_ranks = ranks_in_ith_jth_intra_layer_group
 
-                ## inner
+                # inner
                 for i in range(G_intra_d):
                     for j in range(G_intra_r):
                         group_members = list(
@@ -137,9 +137,8 @@ class communication_handle:
                         )
                         if self.world_rank in group_members:
                             self.inner_intra_layer_parallel_group = group
-                        print(f"inner group - {group_members}")
 
-                ## outer
+                # outer
                 for i in range(G_intra_d):
                     for j in range(G_intra_c):
                         group_members = list(
@@ -150,9 +149,8 @@ class communication_handle:
                         )
                         if self.world_rank in group_members:
                             self.outer_intra_layer_parallel_group = group
-                        print(f"outer group - {group_members}")
 
-                ## depth
+                # depth
                 for i in range(G_intra_r):
                     for j in range(G_intra_c):
                         group_members = list(
@@ -163,7 +161,6 @@ class communication_handle:
                         )
                         if self.world_rank in group_members:
                             self.depth_intra_layer_parallel_group = group
-                        print(f"depth group - {group_members}")
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its
