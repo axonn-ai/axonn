@@ -13,7 +13,9 @@ def drop(x, transpose=False, dim=-1):
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    return Drop.apply(x, group, dim)
+    x = Drop.apply(x, group, dim)
+    x = Drop.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, 0)
+    return x
 
 
 def gather(x, transpose=False, dim=-1):
@@ -22,4 +24,6 @@ def gather(x, transpose=False, dim=-1):
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    return Gather.apply(x, group, dim)
+    x = Gather.apply(x, group, dim)
+    x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, 0)
+    return x

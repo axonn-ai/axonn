@@ -42,6 +42,23 @@ def _gather(input_, dim, process_group=None):
     return output
 
 
+def _reduce_scatter(input_, dim, process_group=None):
+    assert dim == 0, "reduce scatter only implemented for dim=0"
+
+    if dist.get_world_size(process_group) == 1:
+        return input_
+
+    total_chunks = dist.get_world_size(process_group)
+    assert input_.shape[dim] % total_chunks == 0
+    tensor_shape = list(input_.shape)
+    tensor_shape[dim] //= total_chunks
+    output = torch.empty(
+        tensor_shape, dtype=input_.dtype, device=torch.cuda.current_device()
+    )
+    torch.distributed.reduce_scatter_tensor(output, input_, group=process_group)
+    return output
+
+
 class ForwardAllReduce(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_, process_group=None):
@@ -106,6 +123,28 @@ class Gather(torch.autograd.Function):
     def backward(ctx, grad_output):
         return (
             _drop(grad_output, dim=ctx.dim, process_group=ctx.process_group),
+            None,
+            None,
+        )
+
+
+class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
+    @staticmethod
+    def symbolic(graph, input_, process_group=None, dim=0):
+        return _gather(input_, dim=dim, process_group=process_group)
+
+    @staticmethod
+    def forward(ctx, input_, process_group=None, dim=0):
+        assert dim == 0
+        ctx.process_group = process_group
+        ctx.dim = dim
+        return _gather(input_, dim=dim, process_group=process_group)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        assert ctx.dim == 0
+        return (
+            _reduce_scatter(grad_output, dim=ctx.dim, process_group=ctx.process_group),
             None,
             None,
         )
