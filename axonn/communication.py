@@ -4,8 +4,13 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+    MPI4PY_IS_AVAILABLE=False
+except ImportError:
+    MPI4PY_IS_AVAILABLE=False
 import torch
+import numpy as np
 
 
 class communication_handle:
@@ -15,7 +20,13 @@ class communication_handle:
     """
 
     def __init__(
-        self, G_inter: int, G_data: int, G_intra_r=1, G_intra_c=1, gpus_per_node=None
+        self,
+        G_inter: int,
+        G_data: int,
+        G_intra_r=1,
+        G_intra_c=1,
+        G_intra_d=1,
+        gpus_per_node=None,
     ):
         """Constructor for the communication handle
 
@@ -24,27 +35,29 @@ class communication_handle:
             G_data (int): number of GPUs used for data parallelism
             gpus_per_node (int, optional): number of GPUs per node, if not
             provided this is inferred using pytorch
-            G_intra (int): degree of intra-layer parallelism. Note that
-            the user is supposed to implement their intra-layer parallel
-            kernels. AxoNN will just create communicationgroups for
-            intra-layer parallelism
+            G_intra_r (int): number of GPUs in the row intra-layer parallel dimension
+            G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
+            G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
         if not torch.distributed.is_initialized():
+            assert MPI4PY_IS_AVAILABLE, "tried to automatically initialize torch.dist from mpi4py, but it is not installed"
             self.world_rank = MPI.COMM_WORLD.Get_rank()
             self.world_size = MPI.COMM_WORLD.Get_size()
         else:
             self.world_rank = torch.distributed.get_rank()
             self.world_size = torch.distributed.get_world_size()
 
-        G_intra = G_intra_r * G_intra_c
+        G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
             G_inter * G_data * G_intra == self.world_size
-        ), "The product of G_inter and G_data should be equal to the number of GPUs"
+        ), "The product of G_inter, G_intra_r, G_intra_c, G_intra_d,"
+        f"G_data should be equal to the number of GPUs - {self.world_size}"
         self.G_intra = G_intra
         self.G_inter = G_inter
         self.G_data = G_data
         self.G_intra_r = G_intra_r
         self.G_intra_c = G_intra_c
+        self.G_intra_d = G_intra_d
 
         # infer gpus per node if not provided
         self.gpus_per_node = (
@@ -56,7 +69,13 @@ class communication_handle:
         self.intra_layer_column_parallel_rank = (
             self.intra_layer_parallel_rank % G_intra_c
         )
-        self.intra_layer_row_parallel_rank = self.intra_layer_parallel_rank // G_intra_c
+        self.intra_layer_row_parallel_rank = (
+            self.intra_layer_parallel_rank // G_intra_c
+        ) % G_intra_r
+        self.intra_layer_depth_parallel_rank = self.intra_layer_parallel_rank // (
+            G_intra_c * G_intra_r
+        )
+
         self.inter_layer_parallel_rank = (self.world_rank // G_intra) % G_inter
         self.data_parallel_rank = self.world_rank // (G_inter * G_intra)
 
@@ -107,26 +126,53 @@ class communication_handle:
                 )
                 if self.world_rank in ranks_in_ith_jth_intra_layer_group:
                     self.intra_layer_group = ith_jth_intra_layer_group
-                # form row and column tensor parallel groups
-                # G_intra_r x G_intra_c
-                assert len(ranks_in_ith_jth_intra_layer_group) == G_intra_r * G_intra_c
-                intra_layer_ranks = ranks_in_ith_jth_intra_layer_group
-                for i in range(G_intra_r):
-                    offset = i * G_intra_c
-                    group_members = intra_layer_ranks[offset : offset + G_intra_c]
-                    group = torch.distributed.new_group(
-                        ranks=group_members, backend="nccl"
-                    )
-                    if self.world_rank in group_members:
-                        self.inner_intra_layer_parallel_group = group
 
-                for i in range(G_intra_c):
-                    group_members = intra_layer_ranks[i::G_intra_c]
-                    group = torch.distributed.new_group(
-                        ranks=group_members, backend="nccl"
-                    )
-                    if self.world_rank in group_members:
-                        self.outer_intra_layer_parallel_group = group
+                assert (
+                    len(ranks_in_ith_jth_intra_layer_group)
+                    == G_intra_r * G_intra_c * G_intra_d
+                )
+
+                ranks_in_ith_jth_intra_layer_group = np.array(
+                    ranks_in_ith_jth_intra_layer_group
+                ).reshape(G_intra_d, G_intra_r, G_intra_c)
+                # form row and column tensor parallel groups
+                # G_intra_d x G_intra_r x G_intra_c
+
+                # inner
+                for i in range(G_intra_d):
+                    for j in range(G_intra_r):
+                        group_members = list(
+                            ranks_in_ith_jth_intra_layer_group[i, j, :]
+                        )
+                        group = torch.distributed.new_group(
+                            ranks=group_members, backend="nccl"
+                        )
+                        if self.world_rank in group_members:
+                            self.inner_intra_layer_parallel_group = group
+
+                # outer
+                for i in range(G_intra_d):
+                    for j in range(G_intra_c):
+                        group_members = list(
+                            ranks_in_ith_jth_intra_layer_group[i, :, j]
+                        )
+                        group = torch.distributed.new_group(
+                            ranks=group_members, backend="nccl"
+                        )
+                        if self.world_rank in group_members:
+                            self.outer_intra_layer_parallel_group = group
+
+                # depth
+                for i in range(G_intra_r):
+                    for j in range(G_intra_c):
+                        group_members = list(
+                            ranks_in_ith_jth_intra_layer_group[:, i, j]
+                        )
+                        group = torch.distributed.new_group(
+                            ranks=group_members, backend="nccl"
+                        )
+                        if self.world_rank in group_members:
+                            self.depth_intra_layer_parallel_group = group
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its

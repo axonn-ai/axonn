@@ -1,7 +1,7 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import Drop, Gather
+from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
 from torch.autograd import Function
 from torch.cuda.amp import custom_fwd, custom_bwd
 import math
@@ -13,26 +13,33 @@ def divide(a, b):
 
 
 def extract_local_params_from_full_params(
-    full_params, out_features_group, in_features_group
+    full_params, out_features_group, in_features_group, depth_group
 ):
     params = Drop.apply(torch.t(full_params).contiguous(), out_features_group)
     params = torch.t(params).contiguous()
     params = Drop.apply(params, in_features_group)
+    params = Drop.apply(params.reshape(-1), depth_group)  # create 1D view
     return params
 
 
 @torch.no_grad()
 def initialize_params(
-    out_features, in_features, out_features_group, in_features_group, init_method
+    out_features,
+    in_features,
+    out_features_group,
+    in_features_group,
+    depth_group,
+    init_method,
 ):
     params = torch.empty((out_features, in_features))
     init_method(params)
     params = extract_local_params_from_full_params(
-        params, out_features_group, in_features_group
+        params, out_features_group, in_features_group, depth_group
     )
     return params
 
 
+@torch.no_grad()
 def default_init_method(weight):
     return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
 
@@ -94,9 +101,11 @@ class Linear(torch.nn.Module):
         super(Linear, self).__init__()
         self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
         self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
+        self.depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
+        self.depth_group_size = dist.get_world_size(self.depth_group)
 
         self.in_features = in_features
         self.out_features = out_features
@@ -116,6 +125,7 @@ class Linear(torch.nn.Module):
                 in_features,
                 self.outer_group,
                 self.inner_group,
+                self.depth_group,
                 init_method,
             )
         else:
@@ -128,6 +138,7 @@ class Linear(torch.nn.Module):
                 in_features,
                 self.inner_group,
                 self.outer_group,
+                self.depth_group,
                 init_method,
             )
 
@@ -171,30 +182,41 @@ class Linear(torch.nn.Module):
         return self.local_out_features
 
     def forward(self, x, scatter_input=True, gather_output=True):
+        # gather weights from depth parallel group
+        # reduce scatter in the backward pass
+        weight = ForwardGather_BackwardReduceScatter.apply(
+            self.weight, self.depth_group
+        ).reshape(self.local_out_features, self.local_in_features)
+
         if not self.transpose:
             if scatter_input:
                 x = Drop.apply(x, self.inner_group)
+                x = Drop.apply(x, self.depth_group, 0)
             x = AsyncLinear.apply(
                 x,
-                self.weight,
+                weight,
                 self.inner_group,
                 self.outer_group,
                 self.async_comm_in_backward_pass,
             )
             if gather_output:
                 x = Gather.apply(x, self.outer_group)
+                x = Gather.apply(x, self.depth_group, 0)
         else:
             if scatter_input:
                 x = Drop.apply(x, self.outer_group)
+                x = Drop.apply(x, self.depth_group, 0)
+
             x = AsyncLinear.apply(
                 x,
-                self.weight,
+                weight,
                 self.outer_group,
                 self.inner_group,
                 self.async_comm_in_backward_pass,
             )
             if gather_output:
                 x = Gather.apply(x, self.inner_group)
+                x = Gather.apply(x, self.depth_group, 0)
 
         if self.bias is None:
             return x
@@ -211,13 +233,15 @@ class Linear(torch.nn.Module):
                 return x + bias
 
     def _is_full_weight_matrix(self, weight):
-        return (weight.size(0) == self.out_features) and (
-            weight.size(1) == self.in_features
+        return (
+            weight.ndim == 2
+            and weight.size(0) == self.out_features
+            and weight.size(1) == self.in_features
         )
 
     def _is_sharded_weight_matrix(self, weight):
-        return (weight.size(0) == self.local_out_features) and (
-            weight.size(1) == self.local_in_features
+        return weight.ndim == 1 and weight.size(0) == divide(
+            self.local_out_features * self.local_in_features, self.depth_group_size
         )
 
     @torch.no_grad()
@@ -245,9 +269,10 @@ class Linear(torch.nn.Module):
                         self.outer_group,
                     )
                 weight = extract_local_params_from_full_params(
-                    weight, out_features_group, in_features_group
+                    weight, out_features_group, in_features_group, self.depth_group
                 )
-                state_dict[prefix + "weight"] = weight
+
+            state_dict[prefix + "weight"] = weight
 
         if self.bias is not None:
             bias = (
