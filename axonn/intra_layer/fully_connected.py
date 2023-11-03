@@ -11,6 +11,7 @@ def divide(a, b):
     assert a % b == 0
     return a // b
 
+
 @torch.no_grad()
 def extract_local_params_from_full_params(
     params, out_features_group, in_features_group, depth_group
@@ -31,7 +32,7 @@ def initialize_params(
     in_features_group,
     depth_group,
     init_method,
-    init_device='cuda',
+    init_device="cuda",
 ):
     params = torch.empty((out_features, in_features), device=init_device)
     init_method(params)
