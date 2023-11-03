@@ -11,13 +11,14 @@ def divide(a, b):
     assert a % b == 0
     return a // b
 
-
+@torch.no_grad()
 def extract_local_params_from_full_params(
-    full_params, out_features_group, in_features_group, depth_group
+    params, out_features_group, in_features_group, depth_group
 ):
-    params = Drop.apply(torch.t(full_params).contiguous(), out_features_group)
-    params = torch.t(params).contiguous()
+
     params = Drop.apply(params, in_features_group)
+    params = Drop.apply(torch.t(params).contiguous(), out_features_group)
+    params = torch.t(params).contiguous()
     params = Drop.apply(params.reshape(-1), depth_group)  # create 1D view
     return params
 
@@ -30,12 +31,13 @@ def initialize_params(
     in_features_group,
     depth_group,
     init_method,
+    init_device='cuda',
 ):
-    params = torch.empty((out_features, in_features))
+    params = torch.empty((out_features, in_features), device=init_device)
     init_method(params)
     params = extract_local_params_from_full_params(
         params, out_features_group, in_features_group, depth_group
-    )
+    ).cpu()
     return params
 
 
