@@ -16,7 +16,6 @@ def divide(a, b):
 def extract_local_params_from_full_params(
     params, out_features_group, in_features_group, depth_group
 ):
-
     params = Drop.apply(params, in_features_group)
     params = Drop.apply(torch.t(params).contiguous(), out_features_group)
     params = torch.t(params).contiguous()
