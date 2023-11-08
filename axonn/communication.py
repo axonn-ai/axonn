@@ -103,12 +103,13 @@ class communication_handle:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
 
         # create communicators for intra-layer parallelism
-        for i in range(G_data):
-            for j in range(G_inter):
+        print(G_data, G_inter, G_intra)
+        for i_ in range(G_data):
+            for j_ in range(G_inter):
                 ranks_in_ith_jth_intra_layer_group = [
-                    i * G_inter * G_intra + j * G_intra + k for k in range(G_intra)
+                    i_ * G_inter * G_intra + j_ * G_intra + k for k in range(G_intra)
                 ]
-
+                print(ranks_in_ith_jth_intra_layer_group)
                 ith_jth_intra_layer_group = torch.distributed.new_group(
                     ranks=ranks_in_ith_jth_intra_layer_group, backend="nccl"
                 )
