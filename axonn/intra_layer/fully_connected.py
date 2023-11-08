@@ -1,10 +1,13 @@
-from axonn import axonn as ax
+
 import torch.distributed as dist
 import torch
-from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
 from torch.autograd import Function
 from torch.cuda.amp import custom_fwd, custom_bwd
 import math
+
+from axonn import axonn as ax
+import axonn
+from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
 
 
 def divide(a, b):
@@ -97,7 +100,6 @@ class Linear(torch.nn.Module):
         bias=True,
         skip_bias_add=False,
         init_method=None,
-        async_comm_in_backward_pass=True,
         **kwargs
     ):
         super(Linear, self).__init__()
@@ -112,7 +114,6 @@ class Linear(torch.nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        self.async_comm_in_backward_pass = async_comm_in_backward_pass
 
         if init_method is None:
             init_method = default_init_method
@@ -187,7 +188,7 @@ class Linear(torch.nn.Module):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
         weight = ForwardGather_BackwardReduceScatter.apply(
-            self.weight, self.depth_group
+            self.weight, self.depth_group, 0, axonn.intra_layer.OVERLAP_COMM, self.weight.grad
         ).reshape(self.local_out_features, self.local_in_features)
 
         if not self.transpose:
@@ -199,7 +200,7 @@ class Linear(torch.nn.Module):
                 weight,
                 self.inner_group,
                 self.outer_group,
-                self.async_comm_in_backward_pass,
+                axonn.intra_layer.OVERLAP_COMM               
             )
             if gather_output:
                 x = Gather.apply(x, self.outer_group)
@@ -214,7 +215,7 @@ class Linear(torch.nn.Module):
                 weight,
                 self.outer_group,
                 self.inner_group,
-                self.async_comm_in_backward_pass,
+                axonn.intra_layer.OVERLAP_COMM
             )
             if gather_output:
                 x = Gather.apply(x, self.inner_group)

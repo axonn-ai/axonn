@@ -1,5 +1,6 @@
 import torch.distributed as dist
 import torch
+import axonn
 
 
 def _all_reduce(input_, process_group=None):
@@ -42,7 +43,7 @@ def _gather(input_, dim, process_group=None):
     return output
 
 
-def _reduce_scatter(input_, dim, process_group=None):
+def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     assert dim == 0, "reduce scatter only implemented for dim=0"
 
     if dist.get_world_size(process_group) == 1:
@@ -55,7 +56,9 @@ def _reduce_scatter(input_, dim, process_group=None):
     output = torch.empty(
         tensor_shape, dtype=input_.dtype, device=torch.cuda.current_device()
     )
-    torch.distributed.reduce_scatter_tensor(output, input_, group=process_group)
+    handle = torch.distributed.reduce_scatter_tensor(output, input_, group=process_group, async_op=overlap_comm)
+    if overlap_comm:
+        axonn.intra_layer.register_handle(handle)
     return output
 
 
@@ -130,21 +133,30 @@ class Gather(torch.autograd.Function):
 
 class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None, dim=0):
+    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False, main_grad=None):
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
-    def forward(ctx, input_, process_group=None, dim=0):
+    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False, main_grad=None):
         assert dim == 0
         ctx.process_group = process_group
         ctx.dim = dim
+        ctx.overlap_comm = overlap_comm
+        ctx.input=input_
+        ctx.main_grad = main_grad
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
     def backward(ctx, grad_output):
         assert ctx.dim == 0
-        return (
-            _reduce_scatter(grad_output, dim=ctx.dim, process_group=ctx.process_group),
-            None,
-            None,
-        )
+        grad_input = _reduce_scatter(grad_output, dim=ctx.dim, process_group=ctx.process_group, overlap_comm=ctx.overlap_comm)
+        if not ctx.overlap_comm:
+            return (
+                grad_input,
+                None,
+                None,
+                None
+            )
+        else:
+            axonn.intra_layer.accumulate_later(ctx.input, grad_input, ctx.main_grad)
+            return None, None, None, None, None
