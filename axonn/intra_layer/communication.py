@@ -56,7 +56,9 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     output = torch.empty(
         tensor_shape, dtype=input_.dtype, device=torch.cuda.current_device()
     )
-    handle = torch.distributed.reduce_scatter_tensor(output, input_, group=process_group, async_op=overlap_comm)
+    handle = torch.distributed.reduce_scatter_tensor(
+        output, input_, group=process_group, async_op=overlap_comm
+    )
     if overlap_comm:
         axonn.intra_layer.register_handle(handle)
     return output
@@ -133,30 +135,29 @@ class Gather(torch.autograd.Function):
 
 class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False, main_grad=None):
+    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False):
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
-    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False, main_grad=None):
+    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False):
         assert dim == 0
         ctx.process_group = process_group
         ctx.dim = dim
         ctx.overlap_comm = overlap_comm
-        ctx.input=input_
-        ctx.main_grad = main_grad
+        ctx.input = input_
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
     def backward(ctx, grad_output):
         assert ctx.dim == 0
-        grad_input = _reduce_scatter(grad_output, dim=ctx.dim, process_group=ctx.process_group, overlap_comm=ctx.overlap_comm)
+        grad_input = _reduce_scatter(
+            grad_output,
+            dim=ctx.dim,
+            process_group=ctx.process_group,
+            overlap_comm=ctx.overlap_comm,
+        )
         if not ctx.overlap_comm:
-            return (
-                grad_input,
-                None,
-                None,
-                None
-            )
+            return (grad_input, None, None, None, None)
         else:
-            axonn.intra_layer.accumulate_later(ctx.input, grad_input, ctx.main_grad)
+            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
             return None, None, None, None, None

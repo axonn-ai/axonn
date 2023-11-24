@@ -6,6 +6,7 @@ from .communication import Drop, Gather
 from .gradient_normalization import clip_grad_norm_  # noqa: F401
 
 from axonn import axonn as ax
+import torch
 
 
 def drop(x, transpose=False, dim=-1, batch_dim=0):
@@ -30,52 +31,48 @@ def gather(x, transpose=False, dim=-1, batch_dim=0):
     return x
 
 
-OVERLAP_COMM=False
+OVERLAP_COMM = False
 handles = []
 pending_grad_accumulations = []
 
+
 def register_handle(handle):
+    # ToDo: This might be unnecesary since
+    # we are calling synchronize in clear_handles
     global handles
     handles.append(handle)
 
+
 def clear_handles():
     global handles
-    for handle in handles:
-        handle.wait()
+    torch.cuda.synchronize()
     handles = []
 
-def accumulate_later(param, grad, main_grad):
+
+def accumulate_later(param, grad):
     global pending_grad_accumulations
+    pending_grad_accumulations.append([param, grad])
 
-    pending_grad_accumulations.append([param, grad, main_grad])
 
+@torch.no_grad()
 def accumulate():
     global pending_grad_accumulations
-    for param, grad, main_grad in pending_grad_accumulations:
-        if main_grad is None:
+    for param, grad in pending_grad_accumulations:
+        if param.grad is None:
             param.grad = grad
         else:
-            param.grad = main_grad.data.add_(grad)
+            param.grad.add_(grad)
 
     pending_grad_accumulations = []
 
-@contextmanager
-def optimize_communication(enabled : bool = True):
-    ## no sync -> True, cache weights, prevent extra all-gathers
-    ## else -> clear weights
-    global OVERLAP_COMM
-    if not enabled:
-        try:
-            yield None
-        finally:
-            return 
 
-    OVERLAP_COMM=True
+@contextmanager
+def optimize_communication(*args, **kwargs):
+    global OVERLAP_COMM
+    OVERLAP_COMM = True
     try:
         yield None
     finally:
         clear_handles()
         accumulate()
-        OVERLAP_COMM=False
-
-
+        OVERLAP_COMM = False
