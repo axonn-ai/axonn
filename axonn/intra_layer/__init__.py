@@ -32,9 +32,10 @@ def gather(x, transpose=False, dim=-1, batch_dim=0):
 
 
 OVERLAP_COMM = False
+CACHE_WEIGHTS = False
 handles = []
 pending_grad_accumulations = []
-
+weights_cache = {}
 
 def register_handle(handle):
     # ToDo: This might be unnecesary since
@@ -65,11 +66,18 @@ def accumulate():
 
     pending_grad_accumulations = []
 
+def clear_weights_cache():
+    global weights_cache
+    weights_cache = {}
 
 @contextmanager
-def optimize_communication(*args, **kwargs):
-    global OVERLAP_COMM
+def optimize_communication(cache_weights=False, *args, **kwargs):
+    global OVERLAP_COMM, CACHE_WEIGHTS
     OVERLAP_COMM = True
+    if (not cache_weights) and (CACHE_WEIGHTS):
+        raise ValueError("Attempting to set cache_weights to False, when it was earlier set to True. This can lead to erroneous behaviours. Either always use cache_weights=False or cache_weights=True")
+    CACHE_WEIGHTS=cache_weights
+
     try:
         yield None
     finally:

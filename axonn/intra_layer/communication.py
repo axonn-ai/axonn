@@ -22,23 +22,30 @@ def _drop(input_, dim, process_group=None):
     return torch.narrow(input_, dim, this_chunk * chunk_size, chunk_size)
 
 
-def _gather(input_, dim, process_group=None):
+def _gather(input_, dim, process_group=None, cache=False):
     """Gather tensors and concatenate them along a dimension"""
     if dist.get_world_size(process_group) == 1:
         return input_
 
-    input_ = input_.contiguous()
-    # Size and dimension.
-    rank = dist.get_rank(process_group)
+    if input_ in axonn.intra_layer.weights_cache:
+        output = axonn.intra_layer.weights_cache[input_]
 
-    tensor_list = [
-        torch.empty_like(input_) for _ in range(dist.get_world_size(process_group))
-    ]
-    tensor_list[rank] = input_
-    dist.all_gather(tensor_list, input_, group=process_group)
+    else:
+        input_ = input_.contiguous()
+        # Size and dimension.
+        rank = dist.get_rank(process_group)
 
-    # Note: torch.cat already creates a contiguous tensor.
-    output = torch.cat(tensor_list, dim=dim).contiguous()
+        tensor_list = [
+            torch.empty_like(input_) for _ in range(dist.get_world_size(process_group))
+        ]
+        tensor_list[rank] = input_
+        dist.all_gather(tensor_list, input_, group=process_group)
+
+        # Note: torch.cat already creates a contiguous tensor.
+        output = torch.cat(tensor_list, dim=dim).contiguous()
+
+    if cache:
+        axonn.intra_layer.weights_cache[input_] = output
 
     return output
 
@@ -135,17 +142,17 @@ class Gather(torch.autograd.Function):
 
 class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False):
+    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False, cache_all_gather=False):
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
-    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False):
+    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False, cache_all_gather=False):
         assert dim == 0
         ctx.process_group = process_group
         ctx.dim = dim
         ctx.overlap_comm = overlap_comm
         ctx.input = input_
-        return _gather(input_, dim=dim, process_group=process_group)
+        return _gather(input_, dim=dim, process_group=process_group, cache=cache_all_gather)
 
     @staticmethod
     def backward(ctx, grad_output):
