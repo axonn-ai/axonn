@@ -203,7 +203,11 @@ class Linear(torch.nn.Module):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
         weight = ForwardGather_BackwardReduceScatter.apply(
-            self.weight, self.depth_group, 0, axonn.intra_layer.OVERLAP_COMM, axonn.intra_layer.CACHE_WEIGHTS
+            self.weight,
+            self.depth_group,
+            0,
+            axonn.intra_layer.OVERLAP_REDUCE_SCATTER,
+            axonn.intra_layer.CACHE_WEIGHTS,
         ).reshape(self.local_out_features, self.local_in_features)
 
         if not self.transpose:
@@ -215,7 +219,7 @@ class Linear(torch.nn.Module):
                 weight,
                 self.inner_group,
                 self.outer_group,
-                axonn.intra_layer.OVERLAP_COMM,
+                axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
             if gather_output:
@@ -231,7 +235,7 @@ class Linear(torch.nn.Module):
                 weight,
                 self.outer_group,
                 self.inner_group,
-                axonn.intra_layer.OVERLAP_COMM,
+                axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
             if gather_output:

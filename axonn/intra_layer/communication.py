@@ -28,8 +28,10 @@ def _gather(input_, dim, process_group=None, cache=False):
         return input_
 
     if input_ in axonn.intra_layer.weights_cache:
-        output = axonn.intra_layer.weights_cache[input_]
-
+        output, handle = axonn.intra_layer.retrieve_all_gathered_weight(input_)
+        if handle is not None:
+            handle.wait()
+            axonn.intra_layer.weights_cache[input_][1] = None
     else:
         input_ = input_.contiguous()
         # Size and dimension.
@@ -44,8 +46,8 @@ def _gather(input_, dim, process_group=None, cache=False):
         # Note: torch.cat already creates a contiguous tensor.
         output = torch.cat(tensor_list, dim=dim).contiguous()
 
-    if cache:
-        axonn.intra_layer.weights_cache[input_] = output
+        if cache:
+            axonn.intra_layer.weights_cache[input_] = output, None
 
     return output
 
@@ -142,17 +144,33 @@ class Gather(torch.autograd.Function):
 
 class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None, dim=0, overlap_comm=False, cache_all_gather=False):
+    def symbolic(
+        graph,
+        input_,
+        process_group=None,
+        dim=0,
+        overlap_comm=False,
+        cache_all_gather=False,
+    ):
         return _gather(input_, dim=dim, process_group=process_group)
 
     @staticmethod
-    def forward(ctx, input_, process_group=None, dim=0, overlap_comm=False, cache_all_gather=False):
+    def forward(
+        ctx,
+        input_,
+        process_group=None,
+        dim=0,
+        overlap_comm=False,
+        cache_all_gather=False,
+    ):
         assert dim == 0
         ctx.process_group = process_group
         ctx.dim = dim
         ctx.overlap_comm = overlap_comm
         ctx.input = input_
-        return _gather(input_, dim=dim, process_group=process_group, cache=cache_all_gather)
+        return _gather(
+            input_, dim=dim, process_group=process_group, cache=cache_all_gather
+        )
 
     @staticmethod
     def backward(ctx, grad_output):
