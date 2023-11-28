@@ -65,9 +65,16 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     output = torch.empty(
         tensor_shape, dtype=input_.dtype, device=torch.cuda.current_device()
     )
-    handle = torch.distributed.reduce_scatter_tensor(
-        output, input_, group=process_group, async_op=overlap_comm
-    )
+
+    if hasattr(torch.distributed, "reduce_scatter_tensor"):
+        handle = torch.distributed.reduce_scatter_tensor(
+            output, input_, group=process_group, async_op=overlap_comm
+        )
+    else:
+        handle = torch.distributed._reduce_scatter_base(
+            output, input_, group=process_group, async_op=overlap_comm
+        )
+
     if overlap_comm:
         axonn.intra_layer.register_handle(handle)
     return output

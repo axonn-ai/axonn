@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+    MPI4PY = True
+except ImportError:
+    MPI4PY = False
 import torch
 import numpy as np
 
@@ -35,8 +39,14 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
-        self.world_rank = MPI.COMM_WORLD.Get_rank()
-        self.world_size = MPI.COMM_WORLD.Get_size()
+        if not torch.distributed.is_initialized():
+            assert MPI4PY, "either install mpi4py and launch process via mpirun/srun or initialize torch.distributed outside axonn" 
+            self.world_rank = MPI.COMM_WORLD.Get_rank()
+            self.world_size = MPI.COMM_WORLD.Get_size()
+        else:
+            self.world_rank = torch.distributed.get_rank()
+            self.world_size = torch.distributed.get_world_size()
+
         G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
             G_inter * G_data * G_intra == self.world_size
@@ -71,9 +81,18 @@ class communication_handle:
 
         # create communicator for point-to-point(MPI) communication
         colour = self.intra_layer_parallel_rank + G_intra * self.data_parallel_rank
-        # this needs to be checked
-        self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
-        assert self.p2p_mpi_comm.Get_size() == G_inter
+
+        if G_inter > 1:
+            # this needs to be checked
+            if MPI4PY:
+                self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
+                assert self.p2p_mpi_comm.Get_size() == G_inter
+            else:
+                self.p2p_mpi_comm = None
+                print("Warning: AxoNN's implementation of inter-layer parallelism (pipelining) requires mpi4py, which wasn't found." 
+                        "You will have to use an external implementation of pipeline parallelism.")
+        else:
+            self.p2p_mpi_comm = None
 
         # create communicator for collective (NCCL) communication
         if not torch.distributed.is_initialized():
@@ -103,13 +122,11 @@ class communication_handle:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
 
         # create communicators for intra-layer parallelism
-        print(G_data, G_inter, G_intra)
         for i_ in range(G_data):
             for j_ in range(G_inter):
                 ranks_in_ith_jth_intra_layer_group = [
                     i_ * G_inter * G_intra + j_ * G_intra + k for k in range(G_intra)
                 ]
-                print(ranks_in_ith_jth_intra_layer_group)
                 ith_jth_intra_layer_group = torch.distributed.new_group(
                     ranks=ranks_in_ith_jth_intra_layer_group, backend="nccl"
                 )
