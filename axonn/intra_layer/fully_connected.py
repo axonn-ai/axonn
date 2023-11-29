@@ -6,7 +6,12 @@ import math
 
 from axonn import axonn as ax
 import axonn
-from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
+from .communication import (
+    Drop,
+    Gather,
+    ForwardGather_BackwardReduceScatter,
+    BackwardAllReduce,
+)
 
 
 def divide(a, b):
@@ -248,8 +253,12 @@ class Linear(torch.nn.Module):
             bias = self.bias
             if gather_output:
                 bias = Gather.apply(
-                    self.bias,
+                    bias,
                     self.outer_group if not self.transpose else self.inner_group,
+                )
+            else:
+                bias = BackwardAllReduce.apply(
+                    bias, self.depth_group, axonn.intra_layer.OVERLAP_REDUCE_SCATTER
                 )
             if self.skip_bias_add:
                 return x, bias

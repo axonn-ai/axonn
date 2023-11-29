@@ -3,9 +3,14 @@ import torch
 import axonn
 
 
-def _all_reduce(input_, process_group=None):
+def _all_reduce(input_, process_group=None, overlap_comm=False):
+    input_ = input_.contiguous()
     if dist.get_world_size(process_group) > 1:
-        dist.all_reduce(input_.contiguous(), group=process_group)
+        handle = dist.all_reduce(
+            input_.contiguous(), group=process_group, async_op=overlap_comm
+        )
+        if overlap_comm:
+            axonn.intra_layer.register_handle(handle)
     return input_
 
 
@@ -96,17 +101,24 @@ class ForwardAllReduce(torch.autograd.Function):
 
 class BackwardAllReduce(torch.autograd.Function):
     @staticmethod
-    def symbolic(graph, input_, process_group=None):
+    def symbolic(graph, input_, process_group=None, overlap_comm=False):
         return input_
 
     @staticmethod
-    def forward(ctx, input_, process_group=None):
+    def forward(ctx, input_, process_group=None, overlap_comm=False):
         ctx.process_group = process_group
+        ctx.overlap_comm = overlap_comm
+        ctx.input = input_
         return input_
 
     @staticmethod
     def backward(ctx, grad_output):
-        return _all_reduce(grad_output, ctx.process_group), None
+        grad_input = _all_reduce(grad_output, ctx.process_group, ctx.overlap_comm)
+        if not ctx.overlap_comm:
+            return grad_input, None, None
+        else:
+            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
+            return None, None, None
 
 
 class Drop(torch.autograd.Function):

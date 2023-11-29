@@ -121,23 +121,25 @@ def retrieve_all_gathered_weight(weight):
 
 @contextmanager
 def optimize_communication(
-    overlap_all_reduce=True, overlap_reduce_scatter=False, cache_weights=False, overlap_all_gather=False, model=None, *args, **kwargs
+    overlap_all_reduce=True,
+    overlap_reduce_scatter=False,
+    cache_weights=False,
+    overlap_all_gather=False,
+    model=None,
+    *args,
+    **kwargs
 ):
-    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER, CACHE_WEIGHTS, ALL_GATHER_ITERATOR
+    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER, CACHE_WEIGHTS
+    global ALL_GATHER_ITERATOR
     OVERLAP_ALL_REDUCE = overlap_all_reduce
     OVERLAP_REDUCE_SCATTER = overlap_reduce_scatter
 
-    if (not cache_weights) and (CACHE_WEIGHTS):
-        raise ValueError(
-            "Attempting to set cache_weights to False, when it was earlier set to True." 
-            "This can lead to erroneous behaviour. Either always use cache_weights=False or cache_weights=True"
-        )
     CACHE_WEIGHTS = cache_weights
 
     if overlap_all_gather:
         if model is None:
             raise ValueError(
-                "You need to pass your model as an argument - " 
+                "You need to pass your model as an argument - "
                 "optimize_communication(...,model=model, ...)"
                 "if overlap_all_gather is True"
             )

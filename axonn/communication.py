@@ -4,8 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
+
 try:
     from mpi4py import MPI
+
     MPI4PY = True
 except ImportError:
     MPI4PY = False
@@ -40,7 +42,8 @@ class communication_handle:
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
         if not torch.distributed.is_initialized():
-            assert MPI4PY, "either install mpi4py and launch process via mpirun/srun or initialize torch.distributed outside axonn" 
+            assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
+            "or initialize torch.distributed outside axonn"
             self.world_rank = MPI.COMM_WORLD.Get_rank()
             self.world_size = MPI.COMM_WORLD.Get_size()
         else:
@@ -89,8 +92,12 @@ class communication_handle:
                 assert self.p2p_mpi_comm.Get_size() == G_inter
             else:
                 self.p2p_mpi_comm = None
-                print("Warning: AxoNN's implementation of inter-layer parallelism (pipelining) requires mpi4py, which wasn't found." 
-                        "You will have to use an external implementation of pipeline parallelism.")
+                print(
+                    "Warning: AxoNN's implementation of inter-layer"
+                    "parallelism (pipelining) requires mpi4py, which wasn't found."
+                    "You will have to use an external implementation"
+                    "of pipeline parallelism."
+                )
         else:
             self.p2p_mpi_comm = None
 
