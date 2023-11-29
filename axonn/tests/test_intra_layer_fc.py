@@ -2,7 +2,12 @@ import torch
 import pytest
 from axonn import axonn as ax
 from axonn.intra_layer.communication import _drop, _gather
-from axonn.intra_layer import Linear, clip_grad_norm_
+from axonn.intra_layer import (
+    Linear,
+    clip_grad_norm_,
+    optimize_communication,
+    clear_weights_cache,
+)
 
 
 @pytest.mark.mpi
@@ -64,17 +69,20 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
-@pytest.mark.parametrize("G_intra_r, G_intra_c", [(1, 2), (2, 1)])
-@pytest.mark.parametrize("async_comm_in_backward_pass", [True, False])
+@pytest.mark.parametrize(
+    "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
+)
+@pytest.mark.parametrize("comm_opt_level", [0, 4])
 @pytest.mark.parametrize("easy_tp", [False, True])
 @pytest.mark.parametrize("clip_grad_norm", [-1, 1e-3])
 @pytest.mark.parametrize("bias", [False, True])
 def test_bw_pass(
     G_intra_r,
     G_intra_c,
+    G_intra_d,
     B,
     H,
-    async_comm_in_backward_pass,
+    comm_opt_level,
     easy_tp,
     clip_grad_norm,
     bias,
@@ -86,6 +94,7 @@ def test_bw_pass(
         G_inter=1,
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
+        G_intra_d=G_intra_d,
     )
     X = torch.randn(B, H).cuda() * 0.01
     Y_grad = torch.randn(B, H).cuda() * 0.01
@@ -99,7 +108,6 @@ def test_bw_pass(
         in_features=H,
         out_features=H,
         bias=bias,
-        async_comm_in_backward_pass=async_comm_in_backward_pass,
     ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
@@ -119,16 +127,24 @@ def test_bw_pass(
         X_local = X
 
     X_local.requires_grad = True
-    Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
-
     if not easy_tp:
-        Y_local_grad = _drop(Y_grad, 1, outer_group)
-        Y_local_grad = _drop(Y_local_grad, 0, depth_group)
+        Y_local_grad = _drop(Y_grad, 1, outer_group).detach().clone()
+        Y_local_grad = _drop(Y_local_grad, 0, depth_group).detach().clone()
     else:
         Y_local_grad = Y_grad
 
-    Y_local.backward(Y_local_grad)
+    with optimize_communication(
+        overlap_all_reduce=comm_opt_level >= 1,
+        overlap_reduce_scatter=comm_opt_level >= 2,
+        cache_weights=comm_opt_level >= 3,
+        overlap_all_gather=comm_opt_level == 4,
+        model=layer,
+    ):
+        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local.backward(Y_local_grad)
 
+    if comm_opt_level >= 3:
+        clear_weights_cache()
     # sequential backward pass
     X.requires_grad = True
     Y_sequential = layer_sequential(X)
@@ -141,8 +157,8 @@ def test_bw_pass(
         )
 
     if not easy_tp:
-        X_grad_parallel = _gather(X_local.grad, 1, inner_group)
-        X_grad_parallel = _gather(X_grad_parallel, 0, depth_group)
+        X_grad_parallel = _gather(X_local.grad, 0, depth_group)
+        X_grad_parallel = _gather(X_grad_parallel, 1, inner_group)
     else:
         X_grad_parallel = X_local.grad
 
@@ -167,3 +183,17 @@ def test_bw_pass(
         assert torch.allclose(
             bias_grad_parallel, layer_sequential.bias.grad
         ), "BW Pass - gradients of bias do not match"
+
+
+if __name__ == "__main__":
+    test_bw_pass(
+        G_intra_r=1,
+        G_intra_c=1,
+        G_intra_d=2,
+        B=2,
+        H=256,
+        comm_opt_level=0,
+        easy_tp=False,
+        clip_grad_norm=-1,
+        bias=True,
+    )
