@@ -473,6 +473,7 @@ def _forward_pass(input_activation: torch.Tensor, microbatch_no: int, eval_mode:
         if config.inter_layer_parallel_rank == config.G_inter - 1:
             output_tensors_cache[microbatch_no] = output_activation
     else:
+        print_status(input_activation)
         output_activation = model(input_activation)
         input_tensors_cache[microbatch_no] = input_activation
         output_tensors_cache[microbatch_no] = output_activation
@@ -675,7 +676,7 @@ def _sync_scale(local_overflow):
 
 
 def run_batch(
-    batch: torch.Tensor, labels: torch.Tensor, eval_mode=False, post_bw_hook=None
+        batch: torch.Tensor, labels: torch.Tensor, num_microbatches :int, micro_batch_size:int, eval_mode=False, post_bw_hook=None
 ) -> int:
     """Perform forward and backward pass on a batch. This function invokes
     inter-layer-parallelism followed by an all-reduce.
@@ -697,9 +698,10 @@ def run_batch(
         config.G_inter,
         config.G_data,
     )
-    num_microbatches_per_network = batch.shape[0] // config.micro_batch_size
+    config.micro_batch_size = micro_batch_size
+    num_microbatches_per_network = num_microbatches
 
-    if computation_dtype == torch.float16 and batch.dtype == torch.float32:
+    if ilp_rank == 0 and computation_dtype == torch.float16 and batch.dtype == torch.float32:
         batch = batch.half()
 
     if eval_mode:
