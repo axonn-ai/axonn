@@ -473,7 +473,6 @@ def _forward_pass(input_activation: torch.Tensor, microbatch_no: int, eval_mode:
         if config.inter_layer_parallel_rank == config.G_inter - 1:
             output_tensors_cache[microbatch_no] = output_activation
     else:
-        print_status(input_activation)
         output_activation = model(input_activation)
         input_tensors_cache[microbatch_no] = input_activation
         output_tensors_cache[microbatch_no] = output_activation
