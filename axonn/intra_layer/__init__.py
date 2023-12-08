@@ -21,14 +21,17 @@ def drop(x, transpose=False, dim=-1, batch_dim=0):
     return x
 
 
-def gather(x, transpose=False, dim=-1, batch_dim=0):
+def gather(x, transpose=False, dim=-1, batch_dim=0, skip_row_col_gather=False, skip_batch_gather=False):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    x = Gather.apply(x, group, dim)
-    x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
+    if not skip_row_col_gather:
+        x = Gather.apply(x, group, dim)
+    
+    if not skip_batch_gather:
+        x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
     return x
 
 
@@ -86,8 +89,9 @@ def trigger_async_all_gathers(model):
                 process_group = module.depth_group
                 world_size = dist.get_world_size(process_group)
                 if world_size == 1:
-                    all_gathered_weight = weight
-                    handle = None
+                    yield 
+                    #all_gathered_weight = weight
+                    #handle = None
                 else:
                     assert weight.ndim == 1
                     output_shape = weight.shape[0] * world_size
