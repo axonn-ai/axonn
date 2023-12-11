@@ -38,7 +38,6 @@ def gather(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_ba
 
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
-CACHE_WEIGHTS = False
 ALL_GATHER_ITERATOR = None
 handles = []
 pending_grad_accumulations = []
@@ -114,18 +113,18 @@ def enqueue_next_all_gather():
         pass
 
 
-def retrieve_all_gathered_weight(weight):
-    global CACHE_WEIGHTS, ALL_GATHER_ITERATOR
+def retrieve_all_gathered_weight(weight, delete):
+    global ALL_GATHER_ITERATOR
     assert weight in weights_cache
     all_gathered_weight, handle = weights_cache[weight]
     if ALL_GATHER_ITERATOR is not None:
         enqueue_next_all_gather()
-    if not CACHE_WEIGHTS:
+    if delete:
         del weights_cache[weight]
     return all_gathered_weight, handle
 
 @contextmanager
-def overlap_all_gathers_for_checkpointed_forward(model):
+def overlap_all_gathers_for_checkpointed_forward(model_object_for_overlapping_allgathers):
     global ALL_GATHER_ITERATOR
     if ALL_GATHER_ITERATOR is None: ## this is a false call
         try:
@@ -134,7 +133,7 @@ def overlap_all_gathers_for_checkpointed_forward(model):
             pass
     else:
         old_iterator = ALL_GATHER_ITERATOR
-        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model)
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model_object_for_overlapping_allgathers)
         enqueue_next_all_gather()
         try:
             yield None
@@ -145,30 +144,25 @@ def overlap_all_gathers_for_checkpointed_forward(model):
 def optimize_communication(
     overlap_all_reduce=True,
     overlap_reduce_scatter=False,
-    cache_weights=False,
     overlap_all_gather=False,
-    model=None,
+    model_object_for_overlapping_allgathers=None,
     *args,
     **kwargs
 ):
-    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER, CACHE_WEIGHTS
+    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER
     global ALL_GATHER_ITERATOR
     OVERLAP_ALL_REDUCE = overlap_all_reduce
     OVERLAP_REDUCE_SCATTER = overlap_reduce_scatter
 
-    CACHE_WEIGHTS = cache_weights
 
     if overlap_all_gather:
-        if model is None:
+        if model_object_for_overlapping_allgathers is None:
             raise ValueError(
                 "You need to pass your model as an argument - "
                 "optimize_communication(...,model=model, ...)"
                 "if overlap_all_gather is True"
             )
-        #assert (
-        #    cache_weights
-        #), "all gathers can only be overlapped if cache_weights is True"
-        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model)
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model_object_for_overlapping_allgathers)
         enqueue_next_all_gather()
 
     try:
