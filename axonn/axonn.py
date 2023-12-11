@@ -137,6 +137,9 @@ def init(
     config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
     config.data_parallel_rank = comm_handle.data_parallel_rank
     config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
+    config.intra_layer_depth_parallel_rank = comm_handle.intra_layer_depth_parallel_rank
+    config.intra_layer_row_parallel_rank = comm_handle.intra_layer_row_parallel_rank
+    config.intra_layer_column_parallel_rank = comm_handle.intra_layer_column_parallel_rank
     is_initialized = True
     if mixed_precision:
         computation_dtype = torch.float16
