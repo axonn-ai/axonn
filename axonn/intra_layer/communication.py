@@ -36,7 +36,8 @@ def _gather(input_, dim, process_group=None, cache=False):
         output, handle = axonn.intra_layer.retrieve_all_gathered_weight(input_)
         if handle is not None:
             handle.wait()
-            axonn.intra_layer.weights_cache[input_][1] = None
+            if input_ in axonn.intra_layer.weights_cache:
+                axonn.intra_layer.weights_cache[input_][1] = None
     else:
         input_ = input_.contiguous()
         # Size and dimension.

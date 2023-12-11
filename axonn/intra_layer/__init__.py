@@ -120,8 +120,26 @@ def retrieve_all_gathered_weight(weight):
     all_gathered_weight, handle = weights_cache[weight]
     if ALL_GATHER_ITERATOR is not None:
         enqueue_next_all_gather()
+    if not CACHE_WEIGHTS:
+        del weights_cache[weight]
     return all_gathered_weight, handle
 
+@contextmanager
+def overlap_all_gathers_for_checkpointed_forward(model):
+    global ALL_GATHER_ITERATOR
+    if ALL_GATHER_ITERATOR is None: ## this is a false call
+        try:
+            yield None
+        finally:
+            pass
+    else:
+        old_iterator = ALL_GATHER_ITERATOR
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model)
+        enqueue_next_all_gather()
+        try:
+            yield None
+        finally:
+            ALL_GATHER_ITERATOR = old_iterator
 
 @contextmanager
 def optimize_communication(
@@ -147,9 +165,9 @@ def optimize_communication(
                 "optimize_communication(...,model=model, ...)"
                 "if overlap_all_gather is True"
             )
-        assert (
-            cache_weights
-        ), "all gathers can only be overlapped if cache_weights is True"
+        #assert (
+        #    cache_weights
+        #), "all gathers can only be overlapped if cache_weights is True"
         ALL_GATHER_ITERATOR = trigger_async_all_gathers(model)
         enqueue_next_all_gather()
 
