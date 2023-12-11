@@ -10,25 +10,29 @@ import torch
 import torch.distributed as dist
 
 
-def drop(x, transpose=False, dim=-1, batch_dim=0):
+def drop(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    x = Drop.apply(x, group, dim)
-    x = Drop.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
+    if not skip_channels:
+        x = Drop.apply(x, group, dim)
+    if not skip_batch:
+        x = Drop.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
     return x
 
 
-def gather(x, transpose=False, dim=-1, batch_dim=0):
+def gather(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    x = Gather.apply(x, group, dim)
-    x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
+    if not skip_channels:
+        x = Gather.apply(x, group, dim)
+    if not skip_batch:
+        x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
     return x
 
 
