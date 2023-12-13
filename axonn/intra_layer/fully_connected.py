@@ -168,6 +168,7 @@ class Linear(torch.nn.Module):
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
         setattr(self.weight, "is_tensor_parallel", True)
+        setattr(self.weight, "needs_gradient_sync", False)
         setattr(
             self.weight,
             "process_group_for_norm_reduction",
@@ -181,6 +182,7 @@ class Linear(torch.nn.Module):
                 )
             )
             setattr(self.bias, "is_tensor_parallel", True)
+            setattr(self.bias, "needs_gradient_sync", True)
             if not transpose:
                 setattr(
                     self.bias,

@@ -173,3 +173,21 @@ def optimize_communication(
         OVERLAP_ALL_REDUCE = False
         OVERLAP_REDUCE_SCATTER = False
         ALL_GATHER_ITERATOR = None
+
+@torch.no_grad()
+def sync_gradients(model, gradient_attr_name="grad"):
+    grads_to_sync = []
+    for param in model.parameters():
+        grad = getattr(param, gradient_attr_name)
+        if grad is not None:
+            if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+                if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                    grads_to_sync.append(grad)
+            else:
+                grads_to_sync.append(grad)
+  
+    if len(grads_to_sync) > 1:
+        coalesced_gradient = ax._coalesce_and_reassign(grads_to_sync)
+        dist.all_reduce(coalesced_gradient, 
+                        group=ax.comm_handle.depth_intra_layer_parallel_group)
+
