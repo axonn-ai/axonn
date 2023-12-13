@@ -10,7 +10,9 @@ import torch
 import torch.distributed as dist
 
 
-def drop(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False):
+def drop(
+    x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False
+):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
@@ -23,7 +25,9 @@ def drop(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batc
     return x
 
 
-def gather(x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False):
+def gather(
+    x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False
+):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
@@ -123,22 +127,28 @@ def retrieve_all_gathered_weight(weight, delete):
         del weights_cache[weight]
     return all_gathered_weight, handle
 
+
 @contextmanager
-def overlap_all_gathers_for_checkpointed_forward(model_object_for_overlapping_allgathers):
+def overlap_all_gathers_for_checkpointed_forward(
+    model_object_for_overlapping_allgathers,
+):
     global ALL_GATHER_ITERATOR
-    if ALL_GATHER_ITERATOR is None: ## this is a false call
+    if ALL_GATHER_ITERATOR is None:  # this is a false call
         try:
             yield None
         finally:
             pass
     else:
         old_iterator = ALL_GATHER_ITERATOR
-        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model_object_for_overlapping_allgathers)
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(
+            model_object_for_overlapping_allgathers
+        )
         enqueue_next_all_gather()
         try:
             yield None
         finally:
             ALL_GATHER_ITERATOR = old_iterator
+
 
 @contextmanager
 def optimize_communication(
@@ -154,7 +164,6 @@ def optimize_communication(
     OVERLAP_ALL_REDUCE = overlap_all_reduce
     OVERLAP_REDUCE_SCATTER = overlap_reduce_scatter
 
-
     if overlap_all_gather:
         if model_object_for_overlapping_allgathers is None:
             raise ValueError(
@@ -162,7 +171,9 @@ def optimize_communication(
                 "optimize_communication(...,model=model, ...)"
                 "if overlap_all_gather is True"
             )
-        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model_object_for_overlapping_allgathers)
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(
+            model_object_for_overlapping_allgathers
+        )
         enqueue_next_all_gather()
 
     try:
@@ -173,6 +184,7 @@ def optimize_communication(
         OVERLAP_ALL_REDUCE = False
         OVERLAP_REDUCE_SCATTER = False
         ALL_GATHER_ITERATOR = None
+
 
 @torch.no_grad()
 def sync_gradients(model, gradient_attr_name="grad"):
@@ -185,9 +197,9 @@ def sync_gradients(model, gradient_attr_name="grad"):
                     grads_to_sync.append(grad)
             else:
                 grads_to_sync.append(grad)
-  
+
     if len(grads_to_sync) > 1:
         coalesced_gradient = ax._coalesce_and_reassign(grads_to_sync)
-        dist.all_reduce(coalesced_gradient, 
-                        group=ax.comm_handle.depth_intra_layer_parallel_group)
-
+        dist.all_reduce(
+            coalesced_gradient, group=ax.comm_handle.depth_intra_layer_parallel_group
+        )

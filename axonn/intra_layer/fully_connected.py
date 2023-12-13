@@ -6,12 +6,7 @@ import math
 
 from axonn import axonn as ax
 import axonn
-from .communication import (
-    Drop,
-    Gather,
-    ForwardGather_BackwardReduceScatter,
-    BackwardAllReduce,
-)
+from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
 
 
 def divide(a, b):
@@ -206,7 +201,13 @@ class Linear(torch.nn.Module):
     def get_output_feature_size(self):
         return self.local_out_features
 
-    def forward(self, x, scatter_input=True, gather_output=True, cache_weights_in_all_gather=False):
+    def forward(
+        self,
+        x,
+        scatter_input=True,
+        gather_output=True,
+        cache_weights_in_all_gather=False,
+    ):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
         weight = ForwardGather_BackwardReduceScatter.apply(

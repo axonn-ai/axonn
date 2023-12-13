@@ -33,7 +33,9 @@ def _gather(input_, dim, process_group=None, cache=False):
         return input_
 
     if input_ in axonn.intra_layer.weights_cache:
-        output, handle = axonn.intra_layer.retrieve_all_gathered_weight(input_, delete=not cache)
+        output, handle = axonn.intra_layer.retrieve_all_gathered_weight(
+            input_, delete=not cache
+        )
         if handle is not None:
             handle.wait()
             if cache:
