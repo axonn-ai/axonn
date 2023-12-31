@@ -192,14 +192,15 @@ def parition_params_for_extra_all_reduce(model):
     params_for_extra_all_reduce = []
     params_not_for_extra_all_reduce = []
     for param in model.parameters():
-        if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
-            if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
-                params_for_extra_all_reduce.append(param)
-            else:
-                params_not_for_extra_all_reduce.append(param)
+        if param.requires_grad:
+            if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+                if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                    params_for_extra_all_reduce.append(param)
+                else:
+                    params_not_for_extra_all_reduce.append(param)
 
-        else:
-            params_for_extra_all_reduce.append(param)
+            else:
+                params_for_extra_all_reduce.append(param)
    
     return params_for_extra_all_reduce, params_not_for_extra_all_reduce
 

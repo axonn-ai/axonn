@@ -64,7 +64,7 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     assert dim == 0, "reduce scatter only implemented for dim=0"
 
     if dist.get_world_size(process_group) == 1:
-        return input_
+        return input_, None
 
     total_chunks = dist.get_world_size(process_group)
     assert input_.shape[dim] % total_chunks == 0
