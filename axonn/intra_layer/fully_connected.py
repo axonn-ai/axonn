@@ -6,7 +6,7 @@ import math
 
 from axonn import axonn as ax
 import axonn
-from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
+from .communication import Drop, Gather,  _gather, _reduce_scatter, ForwardAllReduce, BackwardAllReduce
 
 
 def divide(a, b):
@@ -55,32 +55,17 @@ class AsyncLinear(Function):
         ctx,
         input_,
         weight,
-        forward_all_reduce_group,
-        backward_all_reduce_group,
+        depth_group,
         backward_comm_async,
-        forward_comm_async,
+        weight_shape,
+        cache_all_gathered_weight
     ):
+        weight = _gather(weight, 0, process_group=depth_group, cache=cache_all_gathered_weight)
+        weight = weight.reshape(weight_shape)
         ctx.save_for_backward(input_, weight)
-        ctx.backward_all_reduce_group = backward_all_reduce_group
+        ctx.backward_all_reduce_group = depth_group
         ctx.backward_comm_async = backward_comm_async
-        if not forward_comm_async:
-            output = input_.matmul(weight.t())
-            dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
-        else:
-            assert input_.shape[0] % 2 == 0
-            input_chunks = torch.chunk(input_, 2)  # each chunk is a view of the tensor
-            output_shape = list(input_.shape)
-            output_shape[-1] = weight.shape[0]
-            outputs = []
-            outputs.append(input_chunks[0].matmul(weight.t()))
-            handle = dist.all_reduce(
-                outputs[-1], group=forward_all_reduce_group, async_op=True
-            )
-            outputs.append(input_chunks[1].matmul(weight.t()))
-            dist.all_reduce(outputs[-1], group=forward_all_reduce_group, async_op=False)
-            handle.wait()  # this call might be unnecessary
-            output = torch.cat(outputs)
-
+        output = input_.matmul(weight.t())
         return output
 
     @staticmethod
@@ -88,19 +73,18 @@ class AsyncLinear(Function):
     def backward(ctx, grad_output):
         input_, weight = ctx.saved_tensors
         handle = None
-        if ctx.needs_input_grad[0]:
-            grad_input = grad_output.matmul(weight)
-            handle = dist.all_reduce(
-                grad_input,
-                group=ctx.backward_all_reduce_group,
-                async_op=ctx.backward_comm_async,
-            )
         if ctx.needs_input_grad[1]:
             grad_weight = (
                 grad_output.reshape(-1, grad_output.shape[-1])
                 .t()
                 .mm(input_.view(-1, input_.shape[-1]))
             )
+            grad_weight, handle = _reduce_scatter(grad_weight.reshape(-1), 
+                                                  0, 
+                                                  process_group=ctx.backward_all_reduce_group, 
+                                                  overlap_comm=ctx.backward_comm_async)
+        if ctx.needs_input_grad[0]:
+            grad_input = grad_output.matmul(weight)
         if handle and ctx.backward_comm_async:
             handle.wait()
         return grad_input, grad_weight, None, None, None, None
@@ -210,26 +194,28 @@ class Linear(torch.nn.Module):
     ):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
-        weight = ForwardGather_BackwardReduceScatter.apply(
-            self.weight,
-            self.depth_group,
-            0,
-            axonn.intra_layer.OVERLAP_REDUCE_SCATTER,
-            cache_weights_in_all_gather,
-        ).reshape(self.local_out_features, self.local_in_features)
+        #weight = ForwardGather_BackwardReduceScatter.apply(
+        #    self.weight,
+        #    self.depth_group,
+        #    0,
+        #    axonn.intra_layer.OVERLAP_REDUCE_SCATTER,
+        #    cache_weights_in_all_gather,
+        #).reshape(self.local_out_features, self.local_in_features)
 
         if not self.transpose:
             if scatter_input:
                 x = Drop.apply(x, self.inner_group)
                 x = Drop.apply(x, self.depth_group, 0)
+            x = BackwardAllReduce.apply(x, self.outer_group, False)
             x = AsyncLinear.apply(
                 x,
-                weight,
-                self.inner_group,
-                self.outer_group,
+                self.weight,
+                self.depth_group,
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
-                False,
+                (self.local_out_features, self.local_in_features),
+                cache_weights_in_all_gather,
             )
+            x = ForwardAllReduce.apply(x, self.inner_group)
             if gather_output:
                 x = Gather.apply(x, self.outer_group)
                 x = Gather.apply(x, self.depth_group, 0)
@@ -237,15 +223,16 @@ class Linear(torch.nn.Module):
             if scatter_input:
                 x = Drop.apply(x, self.outer_group)
                 x = Drop.apply(x, self.depth_group, 0)
-
+            x = BackwardAllReduce.apply(x, self.inner_group, False)
             x = AsyncLinear.apply(
                 x,
-                weight,
-                self.outer_group,
-                self.inner_group,
+                self.weight,
+                self.depth_group,
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
-                False,
+                (self.local_out_features, self.local_in_features),
+                cache_weights_in_all_gather,
             )
+            x = ForwardAllReduce.apply(x, self.outer_group)
             if gather_output:
                 x = Gather.apply(x, self.inner_group)
                 x = Gather.apply(x, self.depth_group, 0)

@@ -83,9 +83,9 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
             output, input_, group=process_group, async_op=overlap_comm
         )
 
-    if overlap_comm:
-        axonn.intra_layer.register_handle(handle)
-    return output
+    #if overlap_comm:
+    #    axonn.intra_layer.register_handle(handle)
+    return output, handle
 
 
 class ForwardAllReduce(torch.autograd.Function):

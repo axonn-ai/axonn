@@ -186,8 +186,26 @@ def optimize_communication(
         ALL_GATHER_ITERATOR = None
 
 
+
+@torch.no_grad()
+def parition_params_for_extra_all_reduce(model):
+    params_for_extra_all_reduce = []
+    params_not_for_extra_all_reduce = []
+    for param in model.parameters():
+        if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+            if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                params_for_extra_all_reduce.append(param)
+            else:
+                params_not_for_extra_all_reduce.append(param)
+
+        else:
+            params_for_extra_all_reduce.append(param)
+   
+    return params_for_extra_all_reduce, params_not_for_extra_all_reduce
+
 @torch.no_grad()
 def sync_gradients(model, gradient_attr_name="grad", mean=False):
+    torch.cuda.nvtx.range_push("sync-grads-bug-fix")
     grads_to_sync = []
     for param in model.parameters():
         grad = getattr(param, gradient_attr_name)
@@ -205,3 +223,25 @@ def sync_gradients(model, gradient_attr_name="grad", mean=False):
         )
         if mean:
             grad.div_(world_size)
+    torch.cuda.nvtx.range_pop()
+@torch.no_grad()
+def sync_gradients(model, gradient_attr_name="grad", mean=False):
+    torch.cuda.nvtx.range_push("sync-grads-bug-fix")
+    grads_to_sync = []
+    for param in model.parameters():
+        grad = getattr(param, gradient_attr_name)
+        if grad is not None:
+            if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+                if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                    grads_to_sync.append(grad)
+            else:
+                grads_to_sync.append(grad)
+    
+    world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
+    for grad in grads_to_sync:
+        dist.all_reduce(
+            grad, group=ax.comm_handle.depth_intra_layer_parallel_group
+        )
+        if mean:
+            grad.div_(world_size)
+    torch.cuda.nvtx.range_pop()
