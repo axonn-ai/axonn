@@ -187,21 +187,36 @@ def optimize_communication(
 
 
 @torch.no_grad()
-def sync_gradients(model, gradient_attr_name="grad", mean=False):
+def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False):
     grads_to_sync = []
     for param in model.parameters():
-        grad = getattr(param, gradient_attr_name)
-        if grad is not None:
-            if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
-                if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+        if param.requires_grad:
+            grad = getattr(param, gradient_attr_name)
+            if grad is not None:
+                if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+                    if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                        grads_to_sync.append(grad)
+                else:
                     grads_to_sync.append(grad)
-            else:
-                grads_to_sync.append(grad)
     
     world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
-    for grad in grads_to_sync:
+    if vectorize:
+        from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+        global_grad = _flatten_dense_tensors(grads_to_sync)
         dist.all_reduce(
-            grad, group=ax.comm_handle.depth_intra_layer_parallel_group
+            global_grad, group=ax.comm_handle.depth_intra_layer_parallel_group
         )
         if mean:
-            grad.div_(world_size)
+            global_grad.div_(world_size)
+
+        for old_tensor, new_tensor in zip(
+            grads_to_sync, _unflatten_dense_tensors(global_grad, grads_to_sync)
+        ):
+            old_tensor.data = new_tensor
+    else:
+        for grad in grads_to_sync:
+            dist.all_reduce(
+                grad, group=ax.comm_handle.depth_intra_layer_parallel_group
+            )
+            if mean:
+                grad.div_(world_size)
