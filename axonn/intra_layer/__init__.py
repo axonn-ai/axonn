@@ -168,7 +168,8 @@ def optimize_communication(
         if model_object_for_overlapping_allgathers is None:
             raise ValueError(
                 "You need to pass your model as an argument - "
-                "optimize_communication(...,model=model, ...)"
+                "optimize_communication(...,model_object_"
+                "for_overlapping_allgathers=model, ...)"
                 "if overlap_all_gather is True"
             )
         ALL_GATHER_ITERATOR = trigger_async_all_gathers(
@@ -194,14 +195,21 @@ def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False
             grad = getattr(param, gradient_attr_name)
             if grad is not None:
                 if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
-                    if hasattr(param, "needs_gradient_sync") and param.needs_gradient_sync:
+                    if (
+                        hasattr(param, "needs_gradient_sync")
+                        and param.needs_gradient_sync
+                    ):
                         grads_to_sync.append(grad)
                 else:
                     grads_to_sync.append(grad)
-    
+
+    if not grads_to_sync:
+        return
+
     world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
     if vectorize:
         from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
         global_grad = _flatten_dense_tensors(grads_to_sync)
         dist.all_reduce(
             global_grad, group=ax.comm_handle.depth_intra_layer_parallel_group
@@ -215,8 +223,6 @@ def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False
             old_tensor.data = new_tensor
     else:
         for grad in grads_to_sync:
-            dist.all_reduce(
-                grad, group=ax.comm_handle.depth_intra_layer_parallel_group
-            )
+            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
             if mean:
                 grad.div_(world_size)
