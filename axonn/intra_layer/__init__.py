@@ -10,31 +10,38 @@ import torch
 import torch.distributed as dist
 
 
-def drop(x, transpose=False, dim=-1, batch_dim=0):
+def drop(
+    x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False
+):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    x = Drop.apply(x, group, dim)
-    x = Drop.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
+    if not skip_channels:
+        x = Drop.apply(x, group, dim)
+    if not skip_batch:
+        x = Drop.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
     return x
 
 
-def gather(x, transpose=False, dim=-1, batch_dim=0):
+def gather(
+    x, transpose=False, dim=-1, batch_dim=0, skip_channels=False, skip_batch=False
+):
     if not transpose:
         group = ax.comm_handle.inner_intra_layer_parallel_group
     else:
         group = ax.comm_handle.outer_intra_layer_parallel_group
 
-    x = Gather.apply(x, group, dim)
-    x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
+    if not skip_channels:
+        x = Gather.apply(x, group, dim)
+    if not skip_batch:
+        x = Gather.apply(x, ax.comm_handle.depth_intra_layer_parallel_group, batch_dim)
     return x
 
 
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
-CACHE_WEIGHTS = False
 ALL_GATHER_ITERATOR = None
 handles = []
 pending_grad_accumulations = []
@@ -110,43 +117,64 @@ def enqueue_next_all_gather():
         pass
 
 
-def retrieve_all_gathered_weight(weight):
-    global CACHE_WEIGHTS, ALL_GATHER_ITERATOR
+def retrieve_all_gathered_weight(weight, delete):
+    global ALL_GATHER_ITERATOR
     assert weight in weights_cache
     all_gathered_weight, handle = weights_cache[weight]
     if ALL_GATHER_ITERATOR is not None:
         enqueue_next_all_gather()
+    if delete:
+        del weights_cache[weight]
     return all_gathered_weight, handle
+
+
+@contextmanager
+def overlap_all_gathers_for_checkpointed_forward(
+    model_object_for_overlapping_allgathers,
+):
+    global ALL_GATHER_ITERATOR
+    if ALL_GATHER_ITERATOR is None:  # this is a false call
+        try:
+            yield None
+        finally:
+            pass
+    else:
+        old_iterator = ALL_GATHER_ITERATOR
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(
+            model_object_for_overlapping_allgathers
+        )
+        enqueue_next_all_gather()
+        try:
+            yield None
+        finally:
+            ALL_GATHER_ITERATOR = old_iterator
 
 
 @contextmanager
 def optimize_communication(
     overlap_all_reduce=True,
     overlap_reduce_scatter=False,
-    cache_weights=False,
     overlap_all_gather=False,
-    model=None,
+    model_object_for_overlapping_allgathers=None,
     *args,
     **kwargs
 ):
-    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER, CACHE_WEIGHTS
+    global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER
     global ALL_GATHER_ITERATOR
     OVERLAP_ALL_REDUCE = overlap_all_reduce
     OVERLAP_REDUCE_SCATTER = overlap_reduce_scatter
 
-    CACHE_WEIGHTS = cache_weights
-
     if overlap_all_gather:
-        if model is None:
+        if model_object_for_overlapping_allgathers is None:
             raise ValueError(
                 "You need to pass your model as an argument - "
-                "optimize_communication(...,model=model, ...)"
+                "optimize_communication(...,model_object_"
+                "for_overlapping_allgathers=model, ...)"
                 "if overlap_all_gather is True"
             )
-        assert (
-            cache_weights
-        ), "all gathers can only be overlapped if cache_weights is True"
-        ALL_GATHER_ITERATOR = trigger_async_all_gathers(model)
+        ALL_GATHER_ITERATOR = trigger_async_all_gathers(
+            model_object_for_overlapping_allgathers
+        )
         enqueue_next_all_gather()
 
     try:
@@ -157,3 +185,44 @@ def optimize_communication(
         OVERLAP_ALL_REDUCE = False
         OVERLAP_REDUCE_SCATTER = False
         ALL_GATHER_ITERATOR = None
+
+
+@torch.no_grad()
+def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False):
+    grads_to_sync = []
+    for param in model.parameters():
+        if param.requires_grad:
+            grad = getattr(param, gradient_attr_name)
+            if grad is not None:
+                if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
+                    if (
+                        hasattr(param, "needs_gradient_sync")
+                        and param.needs_gradient_sync
+                    ):
+                        grads_to_sync.append(grad)
+                else:
+                    grads_to_sync.append(grad)
+
+    if not grads_to_sync:
+        return
+
+    world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
+    if vectorize:
+        from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
+        global_grad = _flatten_dense_tensors(grads_to_sync)
+        dist.all_reduce(
+            global_grad, group=ax.comm_handle.depth_intra_layer_parallel_group
+        )
+        if mean:
+            global_grad.div_(world_size)
+
+        for old_tensor, new_tensor in zip(
+            grads_to_sync, _unflatten_dense_tensors(global_grad, grads_to_sync)
+        ):
+            old_tensor.data = new_tensor
+    else:
+        for grad in grads_to_sync:
+            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
+            if mean:
+                grad.div_(world_size)

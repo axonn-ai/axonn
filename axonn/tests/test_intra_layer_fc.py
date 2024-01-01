@@ -7,6 +7,7 @@ from axonn.intra_layer import (
     clip_grad_norm_,
     optimize_communication,
     clear_weights_cache,
+    sync_gradients,
 )
 
 
@@ -138,11 +139,13 @@ def test_bw_pass(
         overlap_reduce_scatter=comm_opt_level >= 2,
         cache_weights=comm_opt_level >= 3,
         overlap_all_gather=comm_opt_level == 4,
-        model=layer,
+        model_object_for_overlapping_allgathers=layer,
     ):
         Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
         Y_local.backward(Y_local_grad)
 
+    if not easy_tp:
+        sync_gradients(layer)
     if comm_opt_level >= 3:
         clear_weights_cache()
     # sequential backward pass

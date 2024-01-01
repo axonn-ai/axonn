@@ -187,6 +187,20 @@ class communication_handle:
                         if self.world_rank in group_members:
                             self.depth_intra_layer_parallel_group = group
 
+                # combined inner+outer
+                for i in range(G_intra_d):
+                    group_members = list(
+                        ranks_in_ith_jth_intra_layer_group[i, :, :].flatten()
+                    )
+                    group = torch.distributed.new_group(
+                        ranks=group_members, backend="nccl"
+                    )
+                    if self.world_rank in group_members:
+                        self.outer_inner_intra_layer_parallel_group = group
+                        self.outer_inner_intra_layer_parallel_group_root = (
+                            group_members[0]
+                        )
+
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its
         unified virtual address
