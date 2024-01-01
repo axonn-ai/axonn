@@ -6,12 +6,7 @@ import math
 
 from axonn import axonn as ax
 import axonn
-from .communication import (
-    Drop,
-    Gather,
-    ForwardGather_BackwardReduceScatter,
-    BackwardAllReduce,
-)
+from .communication import Drop, Gather, ForwardGather_BackwardReduceScatter
 
 
 def divide(a, b):
@@ -168,6 +163,7 @@ class Linear(torch.nn.Module):
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
         setattr(self.weight, "is_tensor_parallel", True)
+        setattr(self.weight, "needs_gradient_sync", False)
         setattr(
             self.weight,
             "process_group_for_norm_reduction",
@@ -181,6 +177,7 @@ class Linear(torch.nn.Module):
                 )
             )
             setattr(self.bias, "is_tensor_parallel", True)
+            setattr(self.bias, "needs_gradient_sync", True)
             if not transpose:
                 setattr(
                     self.bias,
@@ -204,7 +201,13 @@ class Linear(torch.nn.Module):
     def get_output_feature_size(self):
         return self.local_out_features
 
-    def forward(self, x, scatter_input=True, gather_output=True):
+    def forward(
+        self,
+        x,
+        scatter_input=True,
+        gather_output=True,
+        cache_weights_in_all_gather=False,
+    ):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
         weight = ForwardGather_BackwardReduceScatter.apply(
@@ -212,7 +215,7 @@ class Linear(torch.nn.Module):
             self.depth_group,
             0,
             axonn.intra_layer.OVERLAP_REDUCE_SCATTER,
-            axonn.intra_layer.CACHE_WEIGHTS,
+            cache_weights_in_all_gather,
         ).reshape(self.local_out_features, self.local_in_features)
 
         if not self.transpose:
@@ -255,10 +258,6 @@ class Linear(torch.nn.Module):
                 bias = Gather.apply(
                     bias,
                     self.outer_group if not self.transpose else self.inner_group,
-                )
-            else:
-                bias = BackwardAllReduce.apply(
-                    bias, self.depth_group, axonn.intra_layer.OVERLAP_REDUCE_SCATTER
                 )
             if self.skip_bias_add:
                 return x, bias
