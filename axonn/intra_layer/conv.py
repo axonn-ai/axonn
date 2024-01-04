@@ -1,13 +1,14 @@
 from axonn import axonn as ax
 import torch.distributed as dist
 import torch
-from .communication import ForwardAllReduce, BackwardAllReduce, Drop, ForwardGather_BackwardReduceScatter
+import math
+from .communication import ForwardAllReduce, BackwardAllReduce, Drop, Gather, ForwardGather_BackwardReduceScatter
 from .utils import divide, default_init_method
 
 
 @torch.no_grad()
 def initialize_params(
-    out_channels, in_channels, kernel_size, outer_group, inner_group, init_method, init_device="cuda"
+    out_channels, in_channels, kernel_size, outer_group, inner_group, depth_group, init_method, init_device="cuda"
 ):
     params = torch.empty((out_channels, in_channels, kernel_size, kernel_size), device=init_device)
     init_method(params)
@@ -87,11 +88,13 @@ class Conv2d(torch.nn.Module):
         else:
             self.bias = None
 
+        self.kernel_size = kernel_size
         self.skip_bias_add = skip_bias_add
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
         self.groups = groups  
+    
 
     def forward(
         self, 
@@ -106,6 +109,7 @@ class Conv2d(torch.nn.Module):
             self.depth_group,
             0,
         ).reshape(self.local_out_channels, self.local_in_channels, self.kernel_size, self.kernel_size)
+
 
         if scatter_input:
             # Drop input across the in_channels dimension on the inner_group
