@@ -1,9 +1,13 @@
-from transformers.models.mistral.modeling_mistral import MistralAttention, MistralRotaryEmbedding, MistralMLP, ACT2FN
-import torch.nn as nn
+from transformers.models.mistral.modeling_mistral import (
+    MistralAttention,
+    MistralRotaryEmbedding,
+    MistralMLP,
+    ACT2FN,
+)
 from axonn.intra_layer import Linear
-import torch
 
-def modified_attention_init(self, config): 
+
+def modified_attention_init(self, config):
     super(MistralAttention, self).__init__()
     self.config = config
     self.hidden_size = config.hidden_size
@@ -14,17 +18,21 @@ def modified_attention_init(self, config):
     self.max_position_embeddings = config.max_position_embeddings
     self.rope_theta = config.rope_theta
     self.is_causal = True
-    #This gives an attribute error, not sure why
-    #self.attention_dropout = config.attention_dropout
+    # This gives an attribute error, not sure why
+    # self.attention_dropout = config.attention_dropout
 
     if (self.head_dim * self.num_heads) != self.hidden_size:
         raise ValueError(
-            f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
-            f" and `num_heads`: {self.num_heads})."
+            f"hidden_size must be divisible by num_heads "
+            f"(got `hidden_size`: {self.hidden_size} & `num_heads`: {self.num_heads})."
         )
     self.q_proj = Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-    self.k_proj = Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-    self.v_proj = Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+    self.k_proj = Linear(
+        self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False
+    )
+    self.v_proj = Linear(
+        self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False
+    )
     self.o_proj = Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
     self.rotary_emb = MistralRotaryEmbedding(
@@ -33,7 +41,8 @@ def modified_attention_init(self, config):
         base=self.rope_theta,
     )
 
-def modified_mlp_init(self, config): 
+
+def modified_mlp_init(self, config):
     super(MistralMLP, self).__init__()
     self.config = config
     self.hidden_size = config.hidden_size
@@ -43,6 +52,7 @@ def modified_mlp_init(self, config):
     self.down_proj = Linear(self.intermediate_size, self.hidden_size, bias=False)
     self.act_fn = ACT2FN[config.hidden_act]
 
-def monkey_patch_mistral_with_axonn(): 
+
+def monkey_patch_mistral_with_axonn():
     MistralAttention.__init__ = modified_attention_init
     MistralMLP.__init__ = modified_mlp_init
