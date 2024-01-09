@@ -5,7 +5,6 @@ import math
 from .communication import ForwardAllReduce, BackwardAllReduce, Drop, Gather, ForwardGather_BackwardReduceScatter
 from .utils import divide, default_init_method
 
-
 @torch.no_grad()
 def initialize_params(
     out_channels, in_channels, kernel_size, outer_group, inner_group, depth_group, init_method, init_device="cuda"
@@ -123,9 +122,9 @@ class Conv2d(torch.nn.Module):
 
         if gather_output:
             # Gather input across the in_channels dimension on the inner_group
-            x = Gather.apply(x, self.inner_group, 1)
+            h = Gather.apply(h, self.outer_group, 1)
             # Gather input across the batch dimension on the depth_group
-            x = Gather.apply(x, self.depth_group, 0)  
+            h = Gather.apply(h, self.depth_group, 0)  
 
         if self.bias is None:
             return h
