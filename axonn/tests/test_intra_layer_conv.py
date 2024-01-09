@@ -6,15 +6,17 @@ from axonn.intra_layer import Tensor_Parallel_Conv2d, sync_gradients
 import math
 import torch.distributed as dist
 
+
 def log_dist(msg, ranks=[]):
     assert dist.is_initialized()
     if dist.get_rank() in ranks:
         print(f"Rank {dist.get_rank()} : {msg}")
 
+
 def norm_allclose(X, Y):
     epsilon = 1e-6
     squared_diff = torch.square(X - Y)
-    mse = torch.mean(squared_diff).item() 
+    mse = torch.mean(squared_diff).item()
     rmse = math.sqrt(mse)
 
     log_dist(f"RMSE:{rmse}", [0])
@@ -25,10 +27,13 @@ def norm_allclose(X, Y):
     else:
         return False
 
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("H, W, C", [(64, 64, 4), (64, 64, 8), (64, 32, 8)])
 @pytest.mark.parametrize("B", [2, 4, 16])
-@pytest.mark.parametrize("G_intra_r, G_intra_c, G_intra_d", [(1, 2, 1), (2, 1, 1), (1, 1, 2)])
+@pytest.mark.parametrize(
+    "G_intra_r, G_intra_c, G_intra_d", [(1, 2, 1), (2, 1, 1), (1, 1, 2)]
+)
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
 def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
@@ -87,7 +92,18 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
             bias=bias,
         ).cuda()
         weight_sequential = _gather(
-            _gather(_gather(layer.weight, 0, depth_group).reshape(layer.local_out_channels, layer.local_in_channels, layer.kernel_size, layer.kernel_size), 1, inner_group), 0, outer_group
+            _gather(
+                _gather(layer.weight, 0, depth_group).reshape(
+                    layer.local_out_channels,
+                    layer.local_in_channels,
+                    layer.kernel_size,
+                    layer.kernel_size,
+                ),
+                1,
+                inner_group,
+            ),
+            0,
+            outer_group,
         )
         layer_sequential.weight.copy_(weight_sequential)
         if bias:
@@ -100,7 +116,9 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
 @pytest.mark.mpi
 @pytest.mark.parametrize("H, W, C", [(64, 64, 4), (64, 64, 8), (64, 32, 8)])
 @pytest.mark.parametrize("B", [2, 4, 16])
-@pytest.mark.parametrize("G_intra_r, G_intra_c, G_intra_d", [(1, 2, 1), (2, 1, 1), (1, 1, 2)])
+@pytest.mark.parametrize(
+    "G_intra_r, G_intra_c, G_intra_d", [(1, 2, 1), (2, 1, 1), (1, 1, 2)]
+)
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
 def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
@@ -142,14 +160,13 @@ def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
         )  # divide input channels of X along the depth tensor group
     else:
         X_local = X
-    
+
     X_local.requires_grad = True
     if not easy_tp:
         Y_local_grad = _drop(Y_grad, 1, outer_group).detach().clone()
         Y_local_grad = _drop(Y_local_grad, 0, depth_group).detach().clone()
     else:
         Y_local_grad = Y_grad
-
 
     Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
     Y_local.backward(Y_local_grad)
@@ -166,7 +183,18 @@ def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     ).cuda()
     with torch.no_grad():
         weight_sequential = _gather(
-            _gather(_gather(layer.weight, 0, depth_group).reshape(layer.local_out_channels, layer.local_in_channels, layer.kernel_size, layer.kernel_size), 1, inner_group), 0, outer_group
+            _gather(
+                _gather(layer.weight, 0, depth_group).reshape(
+                    layer.local_out_channels,
+                    layer.local_in_channels,
+                    layer.kernel_size,
+                    layer.kernel_size,
+                ),
+                1,
+                inner_group,
+            ),
+            0,
+            outer_group,
         )
         layer_sequential.weight.copy_(weight_sequential)
         if bias:
@@ -183,10 +211,21 @@ def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
 
     assert norm_allclose(
         X_grad_parallel, X.grad
-    ), f"BW Pass - gradients of input do not match"
+    ), "BW Pass - gradients of input do not match"
 
     weight_grad_parallel = _gather(
-        _gather(_gather(layer.weight.grad, 0, depth_group).reshape(layer.local_out_channels, layer.local_in_channels, layer.kernel_size, layer.kernel_size), 1, inner_group), 0, outer_group
+        _gather(
+            _gather(layer.weight.grad, 0, depth_group).reshape(
+                layer.local_out_channels,
+                layer.local_in_channels,
+                layer.kernel_size,
+                layer.kernel_size,
+            ),
+            1,
+            inner_group,
+        ),
+        0,
+        outer_group,
     )
 
     assert norm_allclose(
@@ -197,6 +236,4 @@ def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
         bias_grad_parallel = _gather(layer.bias.grad, 0, outer_group)
         assert norm_allclose(
             bias_grad_parallel, layer_sequential.bias.grad
-        ), f"BW Pass - gradients of bias do not match"
-
-
+        ), "BW Pass - gradients of bias do not match"
