@@ -1,4 +1,5 @@
 from axonn import axonn as ax
+import axonn
 import torch.distributed as dist
 import torch
 import math
@@ -129,6 +130,8 @@ class Conv2d(torch.nn.Module):
             self.weight,
             self.depth_group,
             0,
+            axonn.intra_layer.OVERLAP_REDUCE_SCATTER, # TODO: We should ideally make the flag part of axonn.axonn instead of just axonn
+            cache_weights_in_all_gather,
         ).reshape(
             self.local_out_channels,
             self.local_in_channels,
