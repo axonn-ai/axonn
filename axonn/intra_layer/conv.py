@@ -167,7 +167,7 @@ class Conv2d(torch.nn.Module):
         if self.bias is None:
             return h
         else:
-            bias = self.bias  # Why do we need this extra copy?
+            bias = self.bias
             if gather_output:
                 bias = Gather.apply(bias, self.outer_group)
 

@@ -3,7 +3,7 @@ import pytest
 from axonn import axonn as ax
 from axonn.intra_layer.communication import _drop, _gather
 from axonn.intra_layer import (
-    Tensor_Parallel_Conv2d,
+    Conv2d,
     optimize_communication,
     clear_weights_cache,
     sync_gradients,
@@ -76,9 +76,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     else:
         X_local = X
 
-    layer = Tensor_Parallel_Conv2d(
-        in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias
-    ).cuda()
+    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).cuda()
 
     with torch.no_grad():
         # parallel FW pass
@@ -155,9 +153,7 @@ def test_bw_pass(
     depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
     # parallel backward pass
-    layer = Tensor_Parallel_Conv2d(
-        in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias
-    ).cuda()
+    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).cuda()
 
     if not easy_tp:
         X_local = (
