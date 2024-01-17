@@ -2,7 +2,12 @@ import torch
 import pytest
 from axonn import axonn as ax
 from axonn.intra_layer.communication import _drop, _gather
-from axonn.intra_layer import Tensor_Parallel_Conv2d, sync_gradients
+from axonn.intra_layer import (
+    Tensor_Parallel_Conv2d,
+    optimize_communication,
+    clear_weights_cache,
+    sync_gradients,
+)
 import math
 import torch.distributed as dist
 
@@ -121,7 +126,10 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
 )
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
-def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
+@pytest.mark.parametrize("comm_opt_level", [0, 3])
+def test_bw_pass(
+    G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, comm_opt_level
+):
     # These tests are in fp-32
     # Need to remove all non-determinism from convolutions
     torch.manual_seed(42)
@@ -168,11 +176,19 @@ def test_bw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     else:
         Y_local_grad = Y_grad
 
-    Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
-    Y_local.backward(Y_local_grad)
+    with optimize_communication(
+        overlap_reduce_scatter=comm_opt_level >= 1,
+        cache_weights=comm_opt_level >= 2,
+        overlap_all_gather=comm_opt_level == 3,
+        model_object_for_overlapping_allgathers=layer,
+    ):
+        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local.backward(Y_local_grad)
 
     if not easy_tp:
         sync_gradients(layer)
+    if comm_opt_level >= 3:
+        clear_weights_cache()
 
     # sequential backward pass
     layer_sequential = torch.nn.Conv2d(

@@ -126,11 +126,12 @@ class Conv2d(torch.nn.Module):
         cache_weights_in_all_gather=False,
     ):
         # Gather weights from depth parallel group
+        # TODO: We should make the OVERLAP_REDUCE_SCATTER flag part of axonn.axonn
         weight = ForwardGather_BackwardReduceScatter.apply(
             self.weight,
             self.depth_group,
             0,
-            axonn.intra_layer.OVERLAP_REDUCE_SCATTER, # TODO: We should ideally make the flag part of axonn.axonn instead of just axonn
+            axonn.intra_layer.OVERLAP_REDUCE_SCATTER,
             cache_weights_in_all_gather,
         ).reshape(
             self.local_out_channels,
