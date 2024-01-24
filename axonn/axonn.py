@@ -9,7 +9,6 @@ from typing import Optional, List, Tuple
 from .communication import communication_handle
 from .optim import CPUAdam
 import torch
-from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from enum import Enum
 import numpy as np
@@ -577,6 +576,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
+    from mpi4py import MPI
     status = MPI.Status()
     if (requests["bw"] is None) and (requests["fw"] is not None):
         requests["fw"][1].Wait(status)
@@ -655,6 +655,7 @@ def _backward_pass(output_gradients, microbatch_no):
 
 
 def _sync_scale(local_overflow):
+    from mpi4py import MPI
     global loss_scale, no_overflow_iters, max_scale
     assert computation_dtype == torch.float16
     overflow_np = np.array(int(local_overflow), "i")

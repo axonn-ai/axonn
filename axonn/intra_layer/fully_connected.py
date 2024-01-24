@@ -64,9 +64,10 @@ class AsyncLinear(Function):
         forward_comm_async,
     ):
 
+        original_weight = weight
         weight = _gather(weight, dim=0, process_group=depth_parallel_group, cache=cache_weights)
         weight = weight.reshape(local_weight_shape)
-        ctx.save_for_backward(input_, weight)
+        ctx.save_for_backward(input_, weight, original_weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.backward_comm_async = backward_comm_async
@@ -93,10 +94,9 @@ class AsyncLinear(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output):
-        input_, weight = ctx.saved_tensors
+        input_, weight, original_weight = ctx.saved_tensors
         handle = None
         overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
-        #def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (not overlap_reduce_scatter):
             if ctx.needs_input_grad[0]:
                 grad_input = grad_output.matmul(weight)
@@ -113,11 +113,12 @@ class AsyncLinear(Function):
                 )
             
             grad_weight = grad_weight.reshape(-1)
-            _reduce_scatter(grad_weight, dim=0, process_group=ctx.depth_parallel_group, overlap_comm=overlap_reduce_scatter)
+            grad_weight = _reduce_scatter(grad_weight, dim=0, process_group=ctx.depth_parallel_group, overlap_comm=overlap_reduce_scatter)
 
             if handle and ctx.backward_comm_async:
                 handle.wait()
             if overlap_reduce_scatter:
+                axonn.intra_layer.accumulate_later(original_weight, grad_weight)
                 grad_weight = None # weight gradients are not ready yet
             return grad_input, grad_weight, None, None, None, None, None, None, None
         else:
@@ -127,16 +128,12 @@ class AsyncLinear(Function):
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
-                _reduce_scatter(grad_weight, dim=0, process_group=ctx.depth_parallel_group, overlap_comm=True)
+                grad_weight =_reduce_scatter(grad_weight, dim=0, process_group=ctx.depth_parallel_group, overlap_comm=True)
+                axonn.intra_layer.accumulate_later(original_weight, grad_weight)
                 grad_weight = None # weight gradients are not ready yet
 
             if ctx.needs_input_grad[0]:
                 grad_input = grad_output.matmul(weight)
-                dist.all_reduce(
-                    grad_input,
-                    group=ctx.backward_all_reduce_group,
-                    async_op=False,
-                )
             return grad_input, grad_weight, None, None, None, None, None, None, None
 
 class Linear(torch.nn.Module):
