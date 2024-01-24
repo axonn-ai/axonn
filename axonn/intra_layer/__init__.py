@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from .fully_connected import Linear  # noqa: F401
-from .conv import Conv2d as Tensor_Parallel_Conv2d  # noqa: F401
+from .conv import Conv2d  # noqa: F401
 
 from .communication import Drop, Gather
 from .gradient_normalization import clip_grad_norm_  # noqa: F401
@@ -86,7 +86,7 @@ def clear_weights_cache():
 def trigger_async_all_gathers(model):
     global weights_cache
     for module in model.modules():
-        if isinstance(module, Linear):
+        if isinstance(module, Linear) or isinstance(module, Conv2d):
             weight = module.weight
             if weight not in weights_cache:
                 # only trigger all gathers if not in cache
