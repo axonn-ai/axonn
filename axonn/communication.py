@@ -6,8 +6,9 @@
 import os
 
 try:
-    #from mpi4py import MPI
+    # from mpi4py import MPI
     import mpi4py
+
     MPI4PY = True
     mpi4py.rc.initialize = False  # do not initialize MPI automatically
     from mpi4py import MPI
