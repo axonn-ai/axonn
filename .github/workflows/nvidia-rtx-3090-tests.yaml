@@ -31,7 +31,7 @@ jobs:
         export G_data=$(( 2 / G_inter ))
         export memopt=${{ matrix.memopt }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
+        mpirun -quiet -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
@@ -47,10 +47,10 @@ jobs:
         pip install -r requirements.txt
     - name: Run intra-layer FC unit tests 
       run: |
-        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
+        mpirun -quiet -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
     - name: Run intra-layer Conv unit tests 
       run: |
-        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_conv.py 
+        mpirun -quiet -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_conv.py 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
