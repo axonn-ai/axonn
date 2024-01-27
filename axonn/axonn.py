@@ -14,6 +14,16 @@ from enum import Enum
 import numpy as np
 import types
 
+try:
+    # from mpi4py import MPI
+    import mpi4py
+
+    MPI4PY = True
+    mpi4py.rc.initialize = False  # do not initialize MPI automatically
+    from mpi4py import MPI
+except ImportError:
+    MPI4PY = False
+
 # True when init has been called
 is_initialized = False
 # Communication handle for point-to-point (MPI) and collective (NCCL) communication
@@ -576,8 +586,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
-    from mpi4py import MPI
-
+    assert MPI4PY, "attempting to use inter-layer parallelism without mpi4py installed"
     status = MPI.Status()
     if (requests["bw"] is None) and (requests["fw"] is not None):
         requests["fw"][1].Wait(status)
@@ -656,7 +665,7 @@ def _backward_pass(output_gradients, microbatch_no):
 
 
 def _sync_scale(local_overflow):
-    from mpi4py import MPI
+    assert MPI4PY, "attempting to use inter-layer parallelism without mpi4py installed"
 
     global loss_scale, no_overflow_iters, max_scale
     assert computation_dtype == torch.float16
