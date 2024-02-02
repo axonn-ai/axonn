@@ -537,7 +537,7 @@ def _post_fw_recv_requests():
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
         tensor = torch.empty(
             size=_fill_shape(model.get_input_shape()),
-            device="cuda",
+            device="cpu",
             dtype=computation_dtype,
         )
         tensor.requires_grad = True
@@ -556,7 +556,7 @@ def _post_bw_recv_requests():
     ):
         tensor = torch.empty(
             size=_fill_shape(model.get_output_shape()),
-            device="cuda",
+            device="cpu",
             dtype=computation_dtype,
         )
         requests["bw"] = [

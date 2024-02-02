@@ -38,7 +38,7 @@ def initialize_params(
     in_features_group,
     depth_group,
     init_method,
-    init_device="cuda",
+    init_device="cpu",
 ):
     params = torch.empty((out_features, in_features), device=init_device)
     init_method(params)
@@ -253,8 +253,8 @@ class Linear(torch.nn.Module):
     def forward(
         self,
         x,
-        scatter_input=True,
-        gather_output=True,
+        scatter_input=False,
+        gather_output=False,
         cache_weights_in_all_gather=False,
     ):
         # gather weights from depth parallel group

@@ -17,6 +17,16 @@ except ImportError:
 import torch
 import numpy as np
 
+class DistributedEnvironment:
+    def __init__(self):
+        self.world_size = int(os.environ["SLURM_NTASKS"])
+        self.local_rank = int(os.environ["SLURM_PROCID"])
+
+    def get_world_size(self):
+        return self.world_size
+
+    def get_rank(self):
+        return self.local_rank
 
 class communication_handle:
     """
@@ -44,6 +54,19 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
+        env = DistributedEnvironment()
+        self.world_rank = env.get_rank()
+        self.world_size = env.get_world_size()
+
+        if gpus_per_node is None:
+            self.backend = "gloo"
+            self.is_gpu_available = False
+        else:
+            self.backend = "nccl"
+            self.is_gpu_available = True
+            self.local_rank = self.world_rank % gpus_per_node
+            torch.cuda.set_device(self.local_rank)
+
         if not torch.distributed.is_initialized():
             assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
             "or initialize torch.distributed outside axonn"
@@ -71,8 +94,6 @@ class communication_handle:
         self.gpus_per_node = (
             gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
         )
-        self.local_rank = self.world_rank % self.gpus_per_node
-        torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra
         self.intra_layer_column_parallel_rank = (
             self.intra_layer_parallel_rank % G_intra_c
@@ -115,7 +136,7 @@ class communication_handle:
             master_port = os.getenv("MASTER_PORT", "6000")
             init_method += master_ip + ":" + master_port
             torch.distributed.init_process_group(
-                backend="nccl",
+                backend=self.backend,
                 world_size=self.world_size,
                 rank=self.world_rank,
                 init_method=init_method,
@@ -130,7 +151,7 @@ class communication_handle:
                     for k in range(self.G_data)
                 ]
                 ith_jth_data_parallel_group = torch.distributed.new_group(
-                    ranks=ranks_in_ith_jth_data_parallel_group, backend="nccl"
+                    ranks=ranks_in_ith_jth_data_parallel_group, backend=self.backend
                 )
                 if self.world_rank in ranks_in_ith_jth_data_parallel_group:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
@@ -142,7 +163,7 @@ class communication_handle:
                     i_ * G_inter * G_intra + j_ * G_intra + k for k in range(G_intra)
                 ]
                 ith_jth_intra_layer_group = torch.distributed.new_group(
-                    ranks=ranks_in_ith_jth_intra_layer_group, backend="nccl"
+                    ranks=ranks_in_ith_jth_intra_layer_group, backend=self.backend
                 )
                 if self.world_rank in ranks_in_ith_jth_intra_layer_group:
                     self.intra_layer_group = ith_jth_intra_layer_group
@@ -165,7 +186,7 @@ class communication_handle:
                             ranks_in_ith_jth_intra_layer_group[i, j, :]
                         )
                         group = torch.distributed.new_group(
-                            ranks=group_members, backend="nccl"
+                            ranks=group_members, backend=self.backend
                         )
                         if self.world_rank in group_members:
                             self.inner_intra_layer_parallel_group = group
@@ -177,7 +198,7 @@ class communication_handle:
                             ranks_in_ith_jth_intra_layer_group[i, :, j]
                         )
                         group = torch.distributed.new_group(
-                            ranks=group_members, backend="nccl"
+                            ranks=group_members, backend=self.backend
                         )
                         if self.world_rank in group_members:
                             self.outer_intra_layer_parallel_group = group
@@ -189,7 +210,7 @@ class communication_handle:
                             ranks_in_ith_jth_intra_layer_group[:, i, j]
                         )
                         group = torch.distributed.new_group(
-                            ranks=group_members, backend="nccl"
+                            ranks=group_members, backend=self.backend
                         )
                         if self.world_rank in group_members:
                             self.depth_intra_layer_parallel_group = group
@@ -200,7 +221,7 @@ class communication_handle:
                         ranks_in_ith_jth_intra_layer_group[i, :, :].flatten()
                     )
                     group = torch.distributed.new_group(
-                        ranks=group_members, backend="nccl"
+                        ranks=group_members, backend=self.backend
                     )
                     if self.world_rank in group_members:
                         self.outer_inner_intra_layer_parallel_group = group
