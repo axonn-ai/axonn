@@ -253,8 +253,8 @@ class Linear(torch.nn.Module):
     def forward(
         self,
         x,
-        scatter_input=False,
-        gather_output=False,
+        scatter_input=True,
+        gather_output=True,
         cache_weights_in_all_gather=False,
     ):
         # gather weights from depth parallel group
