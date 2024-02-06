@@ -38,7 +38,7 @@ def initialize_params(
     in_features_group,
     depth_group,
     init_method,
-    init_device="cpu",
+    init_device="cuda" if torch.cuda.is_available() else "cpu",
 ):
     params = torch.empty((out_features, in_features), device=init_device)
     init_method(params)

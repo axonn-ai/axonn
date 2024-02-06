@@ -535,9 +535,10 @@ def _post_fw_recv_requests():
     Post a receive request for a forward pass
     """
     if (requests["fw"] is None) and config.inter_layer_parallel_rank > 0:
+        deviceCheck = "cuda" if torch.cuda.is_available() else "cpu"
         tensor = torch.empty(
             size=_fill_shape(model.get_input_shape()),
-            device="cpu",
+            device=deviceCheck,
             dtype=computation_dtype,
         )
         tensor.requires_grad = True
@@ -554,9 +555,10 @@ def _post_bw_recv_requests():
     if (requests["bw"] is None) and (
         config.inter_layer_parallel_rank < config.G_inter - 1
     ):
+        deviceCheck = "cuda" if torch.cuda.is_available() else "cpu"
         tensor = torch.empty(
             size=_fill_shape(model.get_output_shape()),
-            device="cpu",
+            device=deviceCheck,
             dtype=computation_dtype,
         )
         requests["bw"] = [

@@ -17,6 +17,7 @@ except ImportError:
 import torch
 import numpy as np
 
+
 class DistributedEnvironment:
     def __init__(self):
         self.world_size = int(os.environ["SLURM_NTASKS"])
@@ -27,6 +28,7 @@ class DistributedEnvironment:
 
     def get_rank(self):
         return self.local_rank
+
 
 class communication_handle:
     """
