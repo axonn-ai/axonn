@@ -56,18 +56,15 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
-        env = DistributedEnvironment()
-        self.world_rank = env.get_rank()
-        self.world_size = env.get_world_size()
-
         if gpus_per_node is None:
             self.backend = "gloo"
             self.is_gpu_available = False
+            env = DistributedEnvironment()
+            self.world_rank = env.get_rank()
+            self.world_size = env.get_world_size()
         else:
             self.backend = "nccl"
             self.is_gpu_available = True
-            self.local_rank = self.world_rank % gpus_per_node
-            torch.cuda.set_device(self.local_rank)
 
         if not torch.distributed.is_initialized():
             assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
@@ -79,6 +76,10 @@ class communication_handle:
         else:
             self.world_rank = torch.distributed.get_rank()
             self.world_size = torch.distributed.get_world_size()
+
+        if gpus_per_node:
+            self.local_rank = self.world_rank % gpus_per_node
+            torch.cuda.set_device(self.local_rank)
 
         G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
