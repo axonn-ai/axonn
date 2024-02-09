@@ -6,9 +6,12 @@
 import os
 
 try:
-    from mpi4py import MPI
+    # from mpi4py import MPI
+    import mpi4py
 
     MPI4PY = True
+    mpi4py.rc.initialize = False  # do not initialize MPI automatically
+    from mpi4py import MPI
 except ImportError:
     MPI4PY = False
 import torch
@@ -44,6 +47,8 @@ class communication_handle:
         if not torch.distributed.is_initialized():
             assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
             "or initialize torch.distributed outside axonn"
+            if not MPI.Is_initialized():
+                MPI.Init()
             self.world_rank = MPI.COMM_WORLD.Get_rank()
             self.world_size = MPI.COMM_WORLD.Get_size()
         else:
@@ -88,6 +93,8 @@ class communication_handle:
         if G_inter > 1:
             # this needs to be checked
             if MPI4PY:
+                if not MPI.Is_initialized():
+                    MPI.Init()
                 self.p2p_mpi_comm = MPI.COMM_WORLD.Split(colour)
                 assert self.p2p_mpi_comm.Get_size() == G_inter
             else:
@@ -244,7 +251,7 @@ class communication_handle:
         self,
         tensor: torch.Tensor,
         send_rank: int,
-        tag: int = MPI.ANY_TAG,
+        tag: int = None,
         async_op: bool = True,
     ):
         """Receive a PyTorch tensor from a particular rank using MPI
@@ -260,6 +267,8 @@ class communication_handle:
             mpi4py future object if async is true, else None - this object
             can be queried to check for completion of communication
         """
+        if tag is None:
+            tag = MPI.ANY_TAG
         mpi4py_compatible_array = self._torch_to_mpi(tensor)
         if async_op:
             mpi_future_object = self.p2p_mpi_comm.Irecv(

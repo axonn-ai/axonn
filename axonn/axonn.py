@@ -9,11 +9,20 @@ from typing import Optional, List, Tuple
 from .communication import communication_handle
 from .optim import CPUAdam
 import torch
-from mpi4py import MPI
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from enum import Enum
 import numpy as np
 import types
+
+try:
+    # from mpi4py import MPI
+    import mpi4py
+
+    MPI4PY = True
+    mpi4py.rc.initialize = False  # do not initialize MPI automatically
+    from mpi4py import MPI
+except ImportError:
+    MPI4PY = False
 
 # True when init has been called
 is_initialized = False
@@ -588,6 +597,7 @@ def _recv(post_fw_recv=True, post_bw_recv=True, eval_mode=False) -> int:
     Returns:
         tag(int): the tag of the received message which is the microbatch number
     """
+    assert MPI4PY, "attempting to use inter-layer parallelism without mpi4py installed"
     status = MPI.Status()
     if (requests["bw"] is None) and (requests["fw"] is not None):
         requests["fw"][1].Wait(status)
@@ -666,6 +676,8 @@ def _backward_pass(output_gradients, microbatch_no):
 
 
 def _sync_scale(local_overflow):
+    assert MPI4PY, "attempting to use inter-layer parallelism without mpi4py installed"
+
     global loss_scale, no_overflow_iters, max_scale
     _assert_16bit()
     overflow_np = np.array(int(local_overflow), "i")
