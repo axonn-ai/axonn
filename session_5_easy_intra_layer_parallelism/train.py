@@ -1,16 +1,19 @@
 import torch
+import torch.nn as nn
 import torchvision
 import sys
 import os
 from torchvision import transforms
 import numpy as np
 from axonn import axonn as ax
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-from model.fc_net_easy_tensor_parallel import FC_Net
+from axonn.intra_layer import Linear
+sys.path.append(os.path.join(os.path.dirname(__file__), '..')) 
+from model.fc_net_sequential import FC_Net
 from utils import print_memory_stats, num_params, log_dist
 from args import create_parser
+import torch.fx
+from torch.fx import symbolic_trace
+
 
 NUM_EPOCHS=2
 PRINT_EVERY=200
@@ -20,6 +23,8 @@ torch.manual_seed(0)
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+
+    torch.distributed.init_process_group() 
 
     ## Step 1 - Initialize AxoNN
     ax.init(
@@ -55,6 +60,32 @@ if __name__ == "__main__":
         num_workers=1,
     )
 
+    model = FC_Net(num_layers=4, input_size=256, hidden_size=2048, output_size=10)
+    symbolic_traced:torch.fx.GraphModule = symbolic_trace(model)
+    print(symbolic_traced.graph)
+    modules_to_replace = []
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            modules_to_replace.append((name, module))
+
+    for name, _ in modules_to_replace:
+        setattr(model, name, Linear(module.in_features, module.out_features))
+
+#    symbolic_traced = torch.fx.symbolic_trace(model)
+
+#    for name, module in model.named_modules():
+#        if isinstance(module, Linear):
+#            print("Found custom layer", name)
+
+    print(model)
+
+#    exit(1) 
+
+
+
+
+
     ## Step 4 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
     params = num_params(net) / 1e9
@@ -65,11 +96,11 @@ if __name__ == "__main__":
     ## Step 6 - register model and optimizer with AxoNN
     ## This creates the required data structures for
     ## mixed precision
-    net, optimizer = ax.register_model_and_optimizer(net, optimizer)
+  #  net, optimizer = ax.register_model_and_optimizer(net, optimizer)
 
     ## Step 7 - Create Loss Function and register it
     loss_fn = torch.nn.CrossEntropyLoss()
-    ax.register_loss_fn(loss_fn)
+   # ax.register_loss_fn(loss_fn)
 
     ## Step 8 - Train
     start_event = torch.cuda.Event(enable_timing=True)
@@ -87,7 +118,14 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             img = img.cuda()
             label = label.cuda()
-            iter_loss = ax.run_batch(img, label)
+          #  iter_loss = ax.run_batch(img, label)
+            output = net(img)
+            iter_loss = loss_fn(output, label)
+
+            # Backawrd Pass
+            iter_loss.backward()
+
+ 
             optimizer.step()
 
             epoch_loss += iter_loss

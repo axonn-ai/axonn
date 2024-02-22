@@ -7,12 +7,13 @@ class FC_Net(nn.Module):
         self.embed = nn.Linear(input_size, hidden_size)
         self.layers = nn.ModuleList([FC_Net_Layer(hidden_size) for _ in range(num_layers)])
         self.clf = nn.Linear(hidden_size, output_size)
+        self.checkpoint_activations = False
 
-    def forward(self, x, checkpoint_activations=False):
+    def forward(self, x):
         x = x.view(x.shape[0], -1)
         x = self.embed(x)
         for layer in self.layers:
-            if not checkpoint_activations:
+            if not self.checkpoint_activations:
                 x = layer(x)
             else:
                 x = torch.utils.checkpoint.checkpoint(layer, x)
@@ -34,7 +35,7 @@ class FC_Net_Layer(nn.Module):
         h = self.linear_2(h)
         return h + x
 
-if __name__ == "__main__":
+if __name__ == "main":
     net = FC_Net(num_layers=2, input_size=256, hidden_size=1024, output_size=10).cuda()
     x = torch.rand(64, 256).cuda()
     y = net(x)
