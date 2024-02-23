@@ -17,6 +17,10 @@ jobs:
         ginter: [ 1, 2 ]
         memopt: [ '0', '1' ]
 
+    env:
+      SLURM_NTASKS: 0
+      SLURM_PROCID: 0
+
     steps:
     - uses: actions/checkout@v3
     - name: Install AxoNN
@@ -39,6 +43,10 @@ jobs:
 
   intra-layer:
     runs-on: [ nvidia ]
+
+    env:
+      SLURM_NTASKS: 0
+      SLURM_PROCID: 0
 
     steps:
     - uses: actions/checkout@v3

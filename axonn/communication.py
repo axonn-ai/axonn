@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
+from axonn import config
 
 try:
     # from mpi4py import MPI
@@ -44,6 +45,7 @@ class communication_handle:
         G_intra_c=1,
         G_intra_d=1,
         gpus_per_node=None,
+        device="cuda",
     ):
         """Constructor for the communication handle
 
@@ -56,15 +58,14 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
-        if gpus_per_node is None:
+        config.device = device
+        if config.device == "cpu":
             self.backend = "gloo"
-            self.is_gpu_available = False
             env = DistributedEnvironment()
             self.world_rank = env.get_rank()
             self.world_size = env.get_world_size()
         else:
             self.backend = "nccl"
-            self.is_gpu_available = True
 
         if not torch.distributed.is_initialized():
             assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
@@ -76,10 +77,6 @@ class communication_handle:
         else:
             self.world_rank = torch.distributed.get_rank()
             self.world_size = torch.distributed.get_world_size()
-
-        if gpus_per_node:
-            self.local_rank = self.world_rank % gpus_per_node
-            torch.cuda.set_device(self.local_rank)
 
         G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
@@ -97,6 +94,10 @@ class communication_handle:
         self.gpus_per_node = (
             gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
         )
+
+        if config.device == "cuda" and gpus_per_node:
+            self.local_rank = self.world_rank % gpus_per_node
+            torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra
         self.intra_layer_column_parallel_rank = (
             self.intra_layer_parallel_rank % G_intra_c
