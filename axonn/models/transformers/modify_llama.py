@@ -50,5 +50,10 @@ def modified_mlp_init(self, config):
 
 
 def monkey_patch_llama_with_axonn():
+    original_inits = {
+        "LlamaAttention": LlamaAttention.__init__,
+        "LlamaMLP": LlamaMLP.__init__,
+    }
     LlamaAttention.__init__ = modified_attention_init
     LlamaMLP.__init__ = modified_mlp_init
+    return original_inits
