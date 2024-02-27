@@ -1,11 +1,12 @@
 from contextlib import contextmanager
 from modify_opt import monkey_patch_opt_with_axonn
+from transformers.models.opt.modeling_opt import OPTAttention, OPTDecoderLayer
 
 modify_dict = {
     "facebook/opt-125m": monkey_patch_opt_with_axonn,
     "facebook/opt-350m": monkey_patch_opt_with_axonn,
     "facebook/opt-1.3b": monkey_patch_opt_with_axonn,
-} 
+}
 
 
 @contextmanager

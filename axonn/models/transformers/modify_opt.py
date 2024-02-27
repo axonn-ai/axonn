@@ -56,7 +56,10 @@ def modified_decoder_init(self, config):
 
 
 def monkey_patch_opt_with_axonn():
-    original_inits = {"OPTAttention": OPTAttention.__init__, "OPTDecoderLayer": OPTDecoderLayer.__init__}
+    original_inits = {
+        "OPTAttention": OPTAttention.__init__,
+        "OPTDecoderLayer": OPTDecoderLayer.__init__,
+    }
     OPTAttention.__init__ = modified_attention_init
     OPTDecoderLayer.__init__ = modified_decoder_init
     return original_inits
