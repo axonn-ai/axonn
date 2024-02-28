@@ -117,7 +117,7 @@ def test_bw_pass(
     )  # divide colunns of X along the inner tensor group
     if not easy_tp:
         X_local = (
-            _drop(X, 1, inner_group).detach().clone()
+            _drop(X_local, 1, inner_group).detach().clone()
         )  # divide colunns of X along the inner tensor group
 
     X_local.requires_grad = True
