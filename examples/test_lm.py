@@ -190,7 +190,7 @@ if __name__ == "__main__":
         G_data=args.G_data,
         G_inter=args.G_inter,
         mixed_precision=True,
-        fp16_allreduce=True,
+        float16_allreduce=True,
         cpu_offload=cpu_offload,
     )
 
