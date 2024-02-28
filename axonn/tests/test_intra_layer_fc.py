@@ -136,8 +136,7 @@ def test_bw_pass(
         Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
         Y_local.backward(Y_local_grad)
 
-    if not easy_tp:
-        sync_gradients(layer)
+    sync_gradients(layer)
     if comm_opt_level >= 3:
         clear_weights_cache()
     # sequential backward pass
