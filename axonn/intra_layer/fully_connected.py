@@ -265,7 +265,6 @@ class Linear(torch.nn.Module):
         if not self.transpose:
             if scatter_input:
                 x = Drop.apply(x, self.inner_group)
-                x = Drop.apply(x, self.depth_group, 0)
             x = AsyncLinear.apply(
                 x,
                 weight,
@@ -279,11 +278,9 @@ class Linear(torch.nn.Module):
             )
             if gather_output:
                 x = Gather.apply(x, self.outer_group)
-                x = Gather.apply(x, self.depth_group, 0)
         else:
             if scatter_input:
                 x = Drop.apply(x, self.outer_group)
-                x = Drop.apply(x, self.depth_group, 0)
 
             x = AsyncLinear.apply(
                 x,
@@ -298,7 +295,6 @@ class Linear(torch.nn.Module):
             )
             if gather_output:
                 x = Gather.apply(x, self.inner_group)
-                x = Gather.apply(x, self.depth_group, 0)
 
         if self.bias is None:
             return x
