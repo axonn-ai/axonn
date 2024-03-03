@@ -43,11 +43,19 @@ def gather(
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
 ALL_GATHER_ITERATOR = None
-ALL_GATHER_DTYPE = torch.bfloat16
+ALL_GATHER_DTYPE = torch.float32
+REDUCE_SCATTER_DTYPE = torch.bfloat16
 handles = []
 pending_grad_accumulations = []
 weights_cache = {}
 
+def set_all_gather_dtype(dtype):
+    global ALL_GATHER_DTYPE
+    ALL_GATHER_DTYPE = dtype
+
+def set_reduce_scatter_dtype(dtype):
+    global REDUCE_SCATTER_DTYPE
+    REDUCE_SCATTER_DTYPE = dtype
 
 def register_handle(handle):
     # ToDo: This might be unnecesary since
