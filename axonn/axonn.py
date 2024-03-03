@@ -111,7 +111,7 @@ def init(
     mixed_precision=False,
     fp16_allreduce=True,
     cpu_offload=False,
-    device='cuda',
+    device="cuda",
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -136,10 +136,15 @@ def init(
     global comm_handle, is_initialized, computation_dtype, _fp16_all_reduce
     global _cpu_offload
     comm_handle = communication_handle(
-            G_inter, G_data, G_intra_r, G_intra_c, G_intra_d, gpus_per_node=gpus_per_node
+        G_inter,
+        G_data,
+        G_intra_r,
+        G_intra_c,
+        G_intra_d,
+        gpus_per_node=gpus_per_node,
+        device=device,
     )
-    print("maybe its this")
-    config.device=device
+    config.device = device
     config.G_inter = G_inter
     config.G_data = G_data
     config.G_intra = G_intra_r * G_intra_c * G_intra_d
@@ -155,7 +160,7 @@ def init(
         comm_handle.intra_layer_column_parallel_rank
     )
     is_initialized = True
-    if device == 'cuda' and not torch.cuda.is_available():
+    if device == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA is not available. Please choose a different device.")
 
     if mixed_precision:

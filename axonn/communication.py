@@ -45,7 +45,7 @@ class communication_handle:
         G_intra_c=1,
         G_intra_d=1,
         gpus_per_node=None,
-        device="cpu",
+        device="cuda",
     ):
         """Constructor for the communication handle
 
@@ -58,10 +58,7 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
-        print("is this the first thing that runs")
         config.device = device
-        print(config.device)
-        print(device)
         if config.device == "cpu":
             self.backend = "gloo"
             env = DistributedEnvironment()
