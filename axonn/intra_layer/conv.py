@@ -1,6 +1,8 @@
 from axonn import axonn as ax
 import axonn
 import torch.distributed as dist
+from torch.autograd import Function
+from torch.cuda.amp import custom_fwd, custom_bwd
 import torch
 import math
 from .communication import (
@@ -38,6 +40,68 @@ def initialize_params(
 @torch.no_grad()
 def default_init_method(weight):
     return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+
+
+class AsyncConv2d(Function):
+    @staticmethod
+    @custom_fwd
+    def forward(
+        ctx, 
+        input_,
+        weight, 
+        stride, 
+        padding,
+        dilation, 
+        groups,
+        forward_all_reduce_group,
+        backward_all_reduce_group,
+        backward_comm_async,
+        forward_comm_async,
+    ):
+        ctx.save_for_backward(input_, weight)
+        ctx.backward_all_reduce_group = backward_all_reduce_group
+        ctx.backward_comm_async = backward_comm_async
+        ctx.conf = {
+            "stride": stride,
+            "padding": padding,
+            "dilation": dilation,
+            "groups": groups,
+        }
+        output = torch.nn.functional.conv2d(input_, weight, bias=None, stride=stride, padding=padding, dilation=dilation, groups=groups)
+        dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
+        return output
+    
+    @staticmethod
+    @custom_bwd
+    def backward(ctx, grad_output):
+        input_, weight = ctx.saved_tensors
+        backward_all_reduce_group = ctx.backward_all_reduce_group
+        backward_comm_async = ctx.backward_comm_async
+        stride = ctx.conf["stride"]
+        padding = ctx.conf["padding"]
+        dilation = ctx.conf["dilation"]
+        groups = ctx.conf["groups"]
+
+        assert groups == 1, "Only groups = 1 supported" 
+
+        grad_input = grad_weight = None
+        handle = None
+
+        if ctx.needs_input_grad[0]:
+            grad_input = torch.nn.grad.conv2d_input(input_.shape, weight, grad_output, stride=stride, padding=padding, dilation=dilation, groups=groups)
+
+            handle = dist.all_reduce(
+                grad_input, 
+                group=backward_all_reduce_group,
+                async_op=backward_comm_async,
+            )
+        if ctx.needs_input_grad[1]:
+            grad_weight = F.conv2d(input_, grad_out, padding=padding, dilation=stride, stride=dilation)
+        
+        if handle and ctx.backward_comm_async:
+            handle.wait()
+        return grad_input, grad_weight, None, None, None, None, None, None, None, None
+
 
 
 class Conv2d(torch.nn.Module):
@@ -147,16 +211,28 @@ class Conv2d(torch.nn.Module):
             x = Drop.apply(x, self.depth_group, 0)
 
         x = BackwardAllReduce.apply(x, self.outer_group)
-        h = torch.nn.functional.conv2d(
+        h = AsyncConv2d.apply(
             x,
             weight,
-            bias=None,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.inner_group,
+            self.outer_group,
+            axonn.intra_layer.OVERLAP_ALL_REDUCE,
+            False
         )
-        h = ForwardAllReduce.apply(h, self.inner_group)
+
+        #h = torch.nn.functional.conv2d(
+        #    x,
+        #    weight,
+        #    bias=None,
+        #    stride=self.stride,
+        #    padding=self.padding,
+        #    dilation=self.dilation,
+        #    groups=self.groups,
+        #)
 
         if gather_output:
             # Gather input across the in_channels dimension on the inner_group
