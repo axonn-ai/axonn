@@ -1,6 +1,7 @@
 import torch.distributed as dist
 import torch
 import axonn
+from axonn import config
 
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
@@ -48,7 +49,7 @@ def _gather(input_, dim, process_group=None, cache=False):
         tensor_list = [
             torch.empty_like(input_) for _ in range(dist.get_world_size(process_group))
         ]
-        if torch.cuda.is_available():
+        if config.device == "cuda":
             tensor_list[rank] = input_
         dist.all_gather(tensor_list, input_, group=process_group)
 
