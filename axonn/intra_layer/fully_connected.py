@@ -106,6 +106,8 @@ class AsyncLinear(Function):
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (
             not overlap_reduce_scatter
         ):
+            grad_input=None
+
             if ctx.needs_input_grad[0]:
                 grad_input = grad_output.matmul(weight)
                 handle = dist.all_reduce(
@@ -135,6 +137,8 @@ class AsyncLinear(Function):
                 grad_weight = None  # weight gradients are not ready yet
             return grad_input, grad_weight, None, None, None, None, None, None, None
         else:
+            grad_input=None
+
             if ctx.needs_input_grad[1]:
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
