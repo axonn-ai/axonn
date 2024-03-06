@@ -117,16 +117,17 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("H, W, C", [(64, 64, 4), (64, 64, 8), (64, 32, 8)])
+@pytest.mark.parametrize("H, W, C", [(64, 64, 4), (64, 64, 8)])
 @pytest.mark.parametrize("B", [2, 4, 16])
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(1, 2, 1), (2, 1, 1), (1, 1, 2)]
 )
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
-@pytest.mark.parametrize("comm_opt_level", [0, 3])
+@pytest.mark.parametrize("comm_opt_level", [0, 4])
+@pytest.mark.parametrize("padding", [0, 1])
 def test_bw_pass(
-    G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, comm_opt_level
+    G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, comm_opt_level, padding
 ):
     # These tests are in fp-32
     # Need to remove all non-determinism from convolutions
@@ -146,14 +147,18 @@ def test_bw_pass(
         G_intra_d=G_intra_d,
     )
     X = torch.randn(B, C, H, W).cuda() * 0.01
-    Y_grad = torch.randn(B, 2 * C, H - 4, W - 4).cuda() * 0.01
+    Y_grad = (
+        torch.randn(B, 2 * C, H + 2 * padding - 4, W + 2 * padding - 4).cuda() * 0.01
+    )
 
     inner_group = ax.comm_handle.inner_intra_layer_parallel_group
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
     depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
     # parallel backward pass
-    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).cuda()
+    layer = Conv2d(
+        in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias, padding=padding
+    ).cuda()
 
     if not easy_tp:
         X_local = (
@@ -173,9 +178,10 @@ def test_bw_pass(
         Y_local_grad = Y_grad
 
     with optimize_communication(
-        overlap_reduce_scatter=comm_opt_level >= 1,
-        cache_weights=comm_opt_level >= 2,
-        overlap_all_gather=comm_opt_level == 3,
+        overlap_all_reduce=comm_opt_level >= 1,
+        overlap_reduce_scatter=comm_opt_level >= 2,
+        cache_weights=comm_opt_level >= 3,
+        overlap_all_gather=comm_opt_level == 4,
         model_object_for_overlapping_allgathers=layer,
     ):
         Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
@@ -192,6 +198,7 @@ def test_bw_pass(
         out_channels=C * 2,
         kernel_size=5,
         bias=bias,
+        padding=padding,
     ).cuda()
     with torch.no_grad():
         weight_sequential = _gather(

@@ -6,8 +6,6 @@ from torch.cuda.amp import custom_fwd, custom_bwd
 import torch
 import math
 from .communication import (
-    ForwardAllReduce,
-    BackwardAllReduce,
     Drop,
     Gather,
     ForwardGather_BackwardReduceScatter,
@@ -46,12 +44,12 @@ class AsyncConv2d(Function):
     @staticmethod
     @custom_fwd
     def forward(
-        ctx, 
+        ctx,
         input_,
-        weight, 
-        stride, 
+        weight,
+        stride,
         padding,
-        dilation, 
+        dilation,
         groups,
         forward_all_reduce_group,
         backward_all_reduce_group,
@@ -67,10 +65,18 @@ class AsyncConv2d(Function):
             "dilation": dilation,
             "groups": groups,
         }
-        output = torch.nn.functional.conv2d(input_, weight, bias=None, stride=stride, padding=padding, dilation=dilation, groups=groups)
+        output = torch.nn.functional.conv2d(
+            input_,
+            weight,
+            bias=None,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+        )
         dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
         return output
-    
+
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output):
@@ -80,28 +86,32 @@ class AsyncConv2d(Function):
         stride = ctx.conf["stride"]
         padding = ctx.conf["padding"]
         dilation = ctx.conf["dilation"]
-        groups = ctx.conf["groups"]
-
-        assert groups == 1, "Only groups = 1 supported" 
 
         grad_input = grad_weight = None
         handle = None
 
         if ctx.needs_input_grad[0]:
-            grad_input = torch.nn.grad.conv2d_input(input_.shape, weight, grad_output, stride=stride, padding=padding, dilation=dilation, groups=groups)
+            grad_input = torch.nn.functional.conv_transpose2d(
+                grad_output, weight, stride=stride, padding=padding
+            )
 
             handle = dist.all_reduce(
-                grad_input, 
+                grad_input,
                 group=backward_all_reduce_group,
                 async_op=backward_comm_async,
             )
         if ctx.needs_input_grad[1]:
-            grad_weight = F.conv2d(input_, grad_out, padding=padding, dilation=stride, stride=dilation)
-        
+            grad_weight = torch.nn.functional.conv2d(
+                input_.transpose(0, 1),
+                grad_output.transpose(0, 1),
+                padding=padding,
+                dilation=stride,
+                stride=dilation,
+            ).transpose(0, 1)
+
         if handle and ctx.backward_comm_async:
             handle.wait()
         return grad_input, grad_weight, None, None, None, None, None, None, None, None
-
 
 
 class Conv2d(torch.nn.Module):
@@ -135,6 +145,10 @@ class Conv2d(torch.nn.Module):
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
         self.depth_group_size = dist.get_world_size(self.depth_group)
+
+        assert stride == 1, ">1 Striding not supported"
+        assert dilation == 1, ">1 Dilation not supported"
+        assert groups == 1, ">1 Groups not supported"
 
         if init_method is None:
             init_method = default_init_method
@@ -210,7 +224,6 @@ class Conv2d(torch.nn.Module):
             # Drop input across the batch dimension on the depth_group
             x = Drop.apply(x, self.depth_group, 0)
 
-        x = BackwardAllReduce.apply(x, self.outer_group)
         h = AsyncConv2d.apply(
             x,
             weight,
@@ -221,18 +234,8 @@ class Conv2d(torch.nn.Module):
             self.inner_group,
             self.outer_group,
             axonn.intra_layer.OVERLAP_ALL_REDUCE,
-            False
+            False,
         )
-
-        #h = torch.nn.functional.conv2d(
-        #    x,
-        #    weight,
-        #    bias=None,
-        #    stride=self.stride,
-        #    padding=self.padding,
-        #    dilation=self.dilation,
-        #    groups=self.groups,
-        #)
 
         if gather_output:
             # Gather input across the in_channels dimension on the inner_group
