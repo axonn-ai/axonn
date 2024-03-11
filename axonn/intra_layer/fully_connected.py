@@ -79,6 +79,7 @@ class AsyncLinear(Function):
         ctx.backward_comm_async = backward_comm_async
         if not forward_comm_async:
             output = input_.matmul(weight.t())
+
             dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
         else:
             assert input_.shape[0] % 2 == 0
