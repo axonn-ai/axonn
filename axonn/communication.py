@@ -95,8 +95,8 @@ class communication_handle:
             gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
         )
 
-        if config.device == "cuda" and gpus_per_node:
-            self.local_rank = self.world_rank % gpus_per_node
+        if config.device == "cuda":
+            self.local_rank = self.world_rank % self.gpus_per_node
             torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra
         self.intra_layer_column_parallel_rank = (
