@@ -14,4 +14,3 @@ class AxonnStyle(DefaultStyle):
     background_color = "#f4f4f8"
     styles[Generic.Output] = "#355"
     styles[Generic.Prompt] = "bold #346ec9"
-
