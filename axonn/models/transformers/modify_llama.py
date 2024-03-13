@@ -1,10 +1,20 @@
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, ACT2FN
 from axonn.intra_layer import Linear
+from typing import Optional
 
 
-def modified_attention_init(self, config):
+def modified_attention_init(self, config, layer_idx: Optional[int] = None):
     super(LlamaAttention, self).__init__()
     self.config = config
+    self.layer_idx = layer_idx
+    if layer_idx is None:
+        logger.warning_once(  # noqa: F821
+            f"Instantiating {self.__class__.__name__} without passing a `layer_idx` is not recommended and will "  # noqa: E501
+            "lead to errors during the forward call if caching is used. Please make sure to provide a `layer_idx` "  # noqa: E501
+            "when creating this class."
+        )
+
+    self.attention_dropout = config.attention_dropout
     self.hidden_size = config.hidden_size
     self.num_heads = config.num_attention_heads
     self.head_dim = self.hidden_size // self.num_heads
@@ -16,9 +26,10 @@ def modified_attention_init(self, config):
 
     if (self.head_dim * self.num_heads) != self.hidden_size:
         raise ValueError(
-            f"hidden_size must be divisible by num_heads "
-            f"(got `hidden_size`: {self.hidden_size} & `num_heads`: {self.num_heads})."
+            f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"  # noqa: E501
+            f" and `num_heads`: {self.num_heads})."
         )
+
     self.q_proj = Linear(
         self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
     )
@@ -32,9 +43,7 @@ def modified_attention_init(self, config):
         self.num_key_value_heads * self.head_dim,
         bias=config.attention_bias,
     )
-    self.o_proj = Linear(
-        self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias
-    )
+    self.o_proj = Linear(self.hidden_size, self.hidden_size, bias=config.attention_bias)
     self._init_rope()
 
 
@@ -50,5 +59,12 @@ def modified_mlp_init(self, config):
 
 
 def monkey_patch_llama_with_axonn():
+    original_inits = LlamaAttention.__init__, LlamaMLP.__init__
     LlamaAttention.__init__ = modified_attention_init
     LlamaMLP.__init__ = modified_mlp_init
+    return original_inits
+
+
+def reverse_monkey_patch_llama_with_axonn(original_attention_init, original_mlp_init):
+    LlamaAttention.__init__ = original_attention_init
+    LlamaMLP.__init__ = original_mlp_init
