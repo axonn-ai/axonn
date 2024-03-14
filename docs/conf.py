@@ -15,14 +15,10 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
 import sys
 
 # sys.path.insert(0, os.path.abspath('.'))
-
-# The name of the Pygments (syntax highlighting) style to use.
-from pygments.styles.default import DefaultStyle
-from pygments.token import Generic
 
 import pkg_resources
 
@@ -60,21 +56,14 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 
-# modifications to the default style
-class AxonnStyle(DefaultStyle):
-    styles = DefaultStyle.styles.copy()
-    background_color = "#f4f4f8"
-    styles[Generic.Output] = "#355"
-    styles[Generic.Prompt] = "bold #346ec9"
-
-
 dist = pkg_resources.Distribution(__file__)
 sys.path.append(".")  # make 'conf' module findable
 ep = pkg_resources.EntryPoint.parse("axonn = conf:AxonnStyle", dist=dist)
 dist._ep_map = {"pygments.styles": {"plugin1": ep}}
 pkg_resources.working_set.add(dist)
 
-pygments_style = "axonn"
+sys.path.insert(0, os.path.abspath("."))
+pygments_style = "axonn_style.AxonnStyle"
 
 
 # -- Options for HTML output -------------------------------------------------
