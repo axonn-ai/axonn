@@ -8,6 +8,7 @@ from .gradient_normalization import clip_grad_norm_  # noqa: F401
 from axonn import axonn as ax
 import torch
 import torch.distributed as dist
+from .automatic_parallelism import auto_parallelize  # noqa: F401
 
 
 def drop(
