@@ -1,20 +1,20 @@
 import torch.nn as nn
-import sys
-import os
 from axonn import axonn as ax
 from axonn.intra_layer import Linear
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-
-def auto_parallellize(model):
+def auto_parallelize(model):
     G_row = ax.config.G_intra_r
     G_col = ax.config.G_intra_c
-    G_depth = ax.config.G_intra_r
+    G_depth = ax.config.G_intra_d
+    # Iterate through all modules in the model
     for name, module in model.named_modules():
         if isinstance(module, nn.Module):
+            # Iterate through all child modules of each module
             for attr_name, attr_module in module.named_children():
+                # Check if the module is a linear layer
                 if isinstance(attr_module, nn.Linear):
+                    # Check if layer is "parallelizable"
                     if (
                         (attr_module.out_features % G_row == 0)
                         and (attr_module.in_features % G_col == 0)
@@ -25,6 +25,7 @@ def auto_parallellize(model):
                             == 0
                         )
                     ):
+                        # Replace the linear layer with Axonn's linear layer
                         setattr(
                             module,
                             attr_name,
