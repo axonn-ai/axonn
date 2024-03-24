@@ -18,6 +18,7 @@ except ImportError:
 import torch
 import numpy as np
 
+
 class communication_handle:
     """
     Communnication handle for point-to-point(MPI) and collective

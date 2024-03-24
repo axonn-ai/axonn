@@ -93,7 +93,7 @@ def test_bw_pass(
     easy_tp,
     clip_grad_norm,
     bias,
-    set_device
+    set_device,
 ):
     # These tests are in fp-32
     torch.manual_seed(42)
