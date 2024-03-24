@@ -19,18 +19,6 @@ import torch
 import numpy as np
 
 
-class DistributedEnvironment:
-    def __init__(self):
-        self.world_size = int(os.environ["SLURM_NTASKS"])
-        self.local_rank = int(os.environ["SLURM_PROCID"])
-
-    def get_world_size(self):
-        return self.world_size
-
-    def get_rank(self):
-        return self.local_rank
-
-
 class communication_handle:
     """
     Communnication handle for point-to-point(MPI) and collective
@@ -61,9 +49,6 @@ class communication_handle:
         config.device = device
         if config.device == "cpu":
             self.backend = "gloo"
-            env = DistributedEnvironment()
-            self.world_rank = env.get_rank()
-            self.world_size = env.get_world_size()
         else:
             self.backend = "nccl"
 
