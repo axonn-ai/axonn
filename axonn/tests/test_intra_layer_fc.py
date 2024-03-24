@@ -82,6 +82,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias, set_devic
 @pytest.mark.parametrize("easy_tp", [False, True])
 @pytest.mark.parametrize("clip_grad_norm", [-1, 1e-3])
 @pytest.mark.parametrize("bias", [False, True])
+@pytest.mark.parametrize("set_device", ["cuda", "cpu"])
 def test_bw_pass(
     G_intra_r,
     G_intra_c,
@@ -101,6 +102,9 @@ def test_bw_pass(
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
         G_intra_d=G_intra_d,
+        mixed_precision=False,
+        fp16_allreduce=False,
+        device=set_device,
     )
     X = torch.randn(B, H).cuda() * 0.01
     Y_grad = torch.randn(B, H).cuda() * 0.01
