@@ -144,7 +144,7 @@ class Conv2d(torch.nn.Module):
             # Drop input across the in_channels dimension on the inner_group
             x = Drop.apply(x, self.inner_group, 1)
             # Drop input across the batch dimension on the depth_group
-            x = Drop.apply(x, self.depth_group, 0)
+            #x = Drop.apply(x, self.depth_group, 0)
 
         x = BackwardAllReduce.apply(x, self.outer_group)
         h = torch.nn.functional.conv2d(
@@ -162,7 +162,7 @@ class Conv2d(torch.nn.Module):
             # Gather input across the in_channels dimension on the inner_group
             h = Gather.apply(h, self.outer_group, 1)
             # Gather input across the batch dimension on the depth_group
-            h = Gather.apply(h, self.depth_group, 0)
+            #h = Gather.apply(h, self.depth_group, 0)
 
         if self.bias is None:
             return h
