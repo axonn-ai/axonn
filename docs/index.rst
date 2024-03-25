@@ -19,6 +19,9 @@ AxoNN is a parallel framework for training deep neural networks.
    :caption: User Docs
 
    getting_started
+   user_guide
+   examples
+   
 
 
 ##################
