@@ -18,15 +18,25 @@ from axonn.intra_layer import (
 )
 @pytest.mark.parametrize("easy_tp", [False, True])
 @pytest.mark.parametrize("bias", [False, True])
-def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
+@pytest.mark.parametrize("set_device", ["cuda", "cpu"])
+def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias, set_device):
     # These tests are in fp-32
     torch.manual_seed(42)
+
+    # GPU runs on axonn-cpu currently do not work with mixed_precision or fp16_allreduce
+    # if set_device == "cpu":
+    #     bool set_mixed_precision = False
+    #     bool set_fp16_allreduce = False
+
     ax.init(
         G_data=1,
         G_inter=1,
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
         G_intra_d=G_intra_d,
+        mixed_precision=False,
+        fp16_allreduce=False,
+        device=set_device,
     )
 
     X = torch.randn(B, H).cuda() * 0.01
@@ -72,6 +82,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
 @pytest.mark.parametrize("easy_tp", [False, True])
 @pytest.mark.parametrize("clip_grad_norm", [-1, 1e-3])
 @pytest.mark.parametrize("bias", [False, True])
+@pytest.mark.parametrize("set_device", ["cuda", "cpu"])
 def test_bw_pass(
     G_intra_r,
     G_intra_c,
@@ -82,6 +93,7 @@ def test_bw_pass(
     easy_tp,
     clip_grad_norm,
     bias,
+    set_device,
 ):
     # These tests are in fp-32
     torch.manual_seed(42)
@@ -91,6 +103,9 @@ def test_bw_pass(
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
         G_intra_d=G_intra_d,
+        mixed_precision=False,
+        fp16_allreduce=False,
+        device=set_device,
     )
     X = torch.randn(B, H).cuda() * 0.01
     Y_grad = torch.randn(B, H).cuda() * 0.01

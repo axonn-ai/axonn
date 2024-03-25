@@ -6,6 +6,7 @@ import math
 
 from axonn import axonn as ax
 import axonn
+from axonn import config
 from .communication import (
     Drop,
     Gather,
@@ -38,9 +39,9 @@ def initialize_params(
     in_features_group,
     depth_group,
     init_method,
-    init_device="cuda",
+    init_device=config.device,
 ):
-    params = torch.empty((out_features, in_features), device=init_device)
+    params = torch.empty((out_features, in_features), device=config.device)
     init_method(params)
     params = extract_local_params_from_full_params(
         params, out_features_group, in_features_group, depth_group
