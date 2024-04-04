@@ -5,6 +5,8 @@ import os
 from torchvision import transforms
 import numpy as np
 from axonn import axonn as ax
+from torch.cuda.amp import GradScaler
+import random
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -15,18 +17,25 @@ from args import create_parser
 NUM_EPOCHS=2
 PRINT_EVERY=200
 
-torch.manual_seed(0)
+seed=123
+
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
 
     ## Step 1 - Initialize AxoNN
+    torch.distributed.init_process_group(backend='nccl')
     ax.init(
                 G_data=args.G_data,
                 G_inter=1,
                 G_intra_r=args.G_intra_r,
                 G_intra_c=args.G_intra_c,
+                G_intra_d=args.G_intra_d,
                 mixed_precision=True,
                 fp16_allreduce=True,
             )
@@ -62,14 +71,11 @@ if __name__ == "__main__":
     ## Step 5 - Create Optimizer 
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
 
-    ## Step 6 - register model and optimizer with AxoNN
-    ## This creates the required data structures for
-    ## mixed precision
-    net, optimizer = ax.register_model_and_optimizer(net, optimizer)
-
-    ## Step 7 - Create Loss Function and register it
+    ## Step 6 - Create Loss Function
     loss_fn = torch.nn.CrossEntropyLoss()
-    ax.register_loss_fn(loss_fn)
+
+    ## Step 7 - Scales the loss prior to the backward pass to prevent underflow of gradients
+    scaler = GradScaler()
 
     ## Step 8 - Train
     start_event = torch.cuda.Event(enable_timing=True)
@@ -87,8 +93,20 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             img = img.cuda()
             label = label.cuda()
-            iter_loss = ax.run_batch(img, label)
-            optimizer.step()
+
+            ## autocast selectively runs certain ops in fp16 and others in fp32
+            ## usually ops that do accumulation (like batch norm) or exponentiation 
+            ## (like softmax) need to be run in fp32 for numerical stability
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                logits = net(img)
+                iter_loss = loss_fn(logits, label)
+
+            ## scaling loss before doing the backward pass
+            scaler.scale(iter_loss).backward()
+            ## unscale gradients and run optimizer
+            scaler.step(optimizer)
+            ## update loss scale 
+            scaler.update()
 
             epoch_loss += iter_loss
             stop_event.record()

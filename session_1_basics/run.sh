@@ -5,9 +5,8 @@
 #SBATCH --time=00:05:00
 #SBATCH -A isc2023-aac
 
-DATA_DIR="/scratch/zt1/project/isc2023/shared/"
+DATA_DIR="../data/"
 
-. /scratch/zt1/project/isc2023/shared/tutorial-venv/bin/activate
 
 SCRIPT=train.py
 ARGS="--num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64"

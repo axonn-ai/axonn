@@ -4,6 +4,7 @@ import sys
 import os
 from torchvision import transforms
 import numpy as np
+import random
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -13,6 +14,14 @@ from args import create_parser
 
 NUM_EPOCHS=2
 PRINT_EVERY=200
+
+
+seed=123
+
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 
 if __name__ == "__main__":
     parser = create_parser()
