@@ -182,9 +182,9 @@ class communication_handle:
                             ordered_tensor_parallel_groups[0] = group
                         
                         if tensor_parallel_order[0] == "d":
-                            group = torch.distributed.new_group(
-                                ranks=group_members, backend="nccl"
-                            )
+                            #group = torch.distributed.new_group(
+                            #    ranks=group_members, backend="nccl"
+                            #)
                             if self.world_rank in group_members:
                                 self.depth_intra_layer_parallel_group_2 = group
 
@@ -214,9 +214,9 @@ class communication_handle:
                             ordered_tensor_parallel_groups[2] = group
 
                         if tensor_parallel_order[2] == "d":
-                            group = torch.distributed.new_group(
-                                ranks=group_members, backend="nccl"
-                            )
+                            #group = torch.distributed.new_group(
+                            #    ranks=group_members, backend="nccl"
+                            #)
                             if self.world_rank in group_members:
                                 self.depth_intra_layer_parallel_group_2 = group
                         
