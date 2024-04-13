@@ -66,26 +66,39 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
 
     if dist.get_world_size(process_group) == 1:
         return input_
-
-    total_chunks = dist.get_world_size(process_group)
-    assert input_.shape[dim] % total_chunks == 0
-    tensor_shape = list(input_.shape)
-    tensor_shape[dim] //= total_chunks
     
-    from axonn.intra_layer import REDUCE_SCATTER_DTYPE
+    from axonn.intra_layer import COMBINE_DEPTH_DATA
     
-    output = torch.empty(
-        tensor_shape, dtype=REDUCE_SCATTER_DTYPE, device=torch.cuda.current_device()
-    )
-
-    if hasattr(torch.distributed, "reduce_scatter_tensor"):
-        handle = torch.distributed.reduce_scatter_tensor(
-            output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
+    if not COMBINE_DEPTH_DATA:
+        total_chunks = dist.get_world_size(process_group)
+        assert input_.shape[dim] % total_chunks == 0
+        tensor_shape = list(input_.shape)
+        tensor_shape[dim] //= total_chunks
+        
+        from axonn.intra_layer import REDUCE_SCATTER_DTYPE
+        
+        output = torch.empty(
+            tensor_shape, dtype=REDUCE_SCATTER_DTYPE, device=torch.cuda.current_device()
         )
+
+        if hasattr(torch.distributed, "reduce_scatter_tensor"):
+            handle = torch.distributed.reduce_scatter_tensor(
+                output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
+            )
+        else:
+            handle = torch.distributed._reduce_scatter_base(
+                output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
+            )
     else:
-        handle = torch.distributed._reduce_scatter_base(
-            output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
+        #if torch.distributed.get_rank() == 0:
+        #    print("FUSED DEPTH REDUCE-SCATTER + DATA PARALLEL ALL REDUCE")
+        from axonn import axonn as ax
+        process_group = ax.comm_handle.depth_data_group
+        assert overlap_comm
+        handle = torch.distributed.all_reduce(
+            input_, async_op=overlap_comm, group=process_group
         )
+        output = input_
 
     if overlap_comm:
         axonn.intra_layer.register_handle(handle)

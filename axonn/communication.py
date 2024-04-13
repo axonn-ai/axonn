@@ -136,7 +136,9 @@ class communication_handle:
                 if self.world_rank in ranks_in_ith_jth_data_parallel_group:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
 
-        #tensor_parallel_order=["r", "c", "d"]
+        assert tensor_parallel_order == ["c", "r", "d"]
+        assert G_inter == 1
+
         tensor_parallel_group_sizes = {
                         "c": G_intra_c,
                         "r": G_intra_r,
@@ -144,6 +146,26 @@ class communication_handle:
                     } 
         ordered_tensor_parallel_group_sizes = [tensor_parallel_group_sizes[group_name] for group_name in tensor_parallel_order]
         ordered_tensor_parallel_groups = [None, None, None]
+
+        ##make combined depth+data group first
+        all_ranks_numpy = np.arange(self.world_size).reshape(G_data, 
+                                                             G_intra_d, 
+                                                             G_intra_r, 
+                                                             G_intra_c)
+        
+        for i in range(G_intra_c):
+            for j in range(G_intra_r):
+                group_members = list(all_ranks_numpy[:,:,j,i].reshape(-1))
+                print(group_members)
+
+                group = torch.distributed.new_group(
+                    ranks=group_members, backend="nccl"
+                )
+                
+                if self.world_rank in group_members:
+                    self.depth_data_group = group
+
+
 
         # create communicators for intra-layer parallelism
         for i_ in range(G_data):

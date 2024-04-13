@@ -42,12 +42,15 @@ def gather(
 
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
+COMBINE_DEPTH_DATA = True
 ALL_GATHER_ITERATOR = None
 ALL_GATHER_DTYPE = torch.bfloat16
 REDUCE_SCATTER_DTYPE = torch.bfloat16
 handles = []
 pending_grad_accumulations = []
 weights_cache = {}
+MAX_PENDING_REDUCES = 1
+pending_reduces = 0
 
 def set_all_gather_dtype(dtype):
     global ALL_GATHER_DTYPE
@@ -71,13 +74,42 @@ def clear_handles():
 
 
 def accumulate_later(param, grad):
-    global pending_grad_accumulations
+    global pending_grad_accumulations, pending_reduces, MAX_PENDING_REDUCES
+    if COMBINE_DEPTH_DATA and pending_reduces == MAX_PENDING_REDUCES:
+        assert len(handles) == len(pending_grad_accumulations) + 1
+        for i in range(MAX_PENDING_REDUCES):
+            last_grad = pending_grad_accumulations[-(i+1)][1]
+            last_handle = handles[-(i+1)]
+            last_handle.wait()
+
+            with torch.no_grad():
+                #if torch.distributed.get_rank() == 0:
+                #    print(f"Total number of handles = {len(handles)}")
+                last_grad = Drop.apply(last_grad, ax.comm_handle.depth_intra_layer_parallel_group, -1)
+                pending_grad_accumulations[-(i+1)][1] = last_grad
+            
+        pending_reduces = 0
+        MAX_PENDING_REDUCES = 4
+
     pending_grad_accumulations.append([param, grad])
+    pending_reduces += 1
 
 
 @torch.no_grad()
 def accumulate():
-    global pending_grad_accumulations
+    global pending_grad_accumulations, pending_reduces
+    if COMBINE_DEPTH_DATA and (pending_reduces > 0):
+        #if torch.distributed.get_rank() == 0:
+            #print(f"Dropping last gradient")
+            #print(f"{len(handles)}")
+        for i in range(pending_reduces):
+            last_grad = pending_grad_accumulations[-(i+1)][1]
+            last_grad = Drop.apply(last_grad, ax.comm_handle.depth_intra_layer_parallel_group, -1)
+            pending_grad_accumulations[-(i+1)][1] = last_grad
+        
+        pending_reduces = 0
+        MAX_PENDING_REDUCES = 1
+
     for param, grad in pending_grad_accumulations:
         if param.grad is None:
             param.grad = grad.to(param.dtype)
@@ -232,6 +264,6 @@ def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False
             old_tensor.data = new_tensor
     else:
         for grad in grads_to_sync:
-            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
+            dist.all_reduce(grad, group=ax.comm_handle.depth_data_group)
             if mean:
                 grad.div_(world_size)
