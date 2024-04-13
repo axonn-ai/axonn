@@ -70,7 +70,7 @@ class AsyncLinear(Function):
     ):
         original_weight = weight
         weight = _gather(
-            weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
+            weight, dim=0, process_group=ax.comm_handle.depth_intra_layer_parallel_group_2, cache=cache_weights
         )
         weight = weight.reshape(local_weight_shape)
         ctx.save_for_backward(input_, weight, original_weight)
@@ -107,7 +107,7 @@ class AsyncLinear(Function):
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (
             not overlap_reduce_scatter
         ):
-            grad_weight, grad_input = None
+            grad_weight, grad_input = None, None
             if ctx.needs_input_grad[0]:
                 grad_input = grad_output.matmul(weight)
                 handle = dist.all_reduce(

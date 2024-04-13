@@ -32,6 +32,7 @@ class communication_handle:
         G_intra_c=1,
         G_intra_d=1,
         gpus_per_node=None,
+        tensor_parallel_order=["c", "r" ,"d"]
     ):
         """Constructor for the communication handle
 
@@ -135,6 +136,15 @@ class communication_handle:
                 if self.world_rank in ranks_in_ith_jth_data_parallel_group:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
 
+        #tensor_parallel_order=["r", "c", "d"]
+        tensor_parallel_group_sizes = {
+                        "c": G_intra_c,
+                        "r": G_intra_r,
+                        "d": G_intra_d
+                    } 
+        ordered_tensor_parallel_group_sizes = [tensor_parallel_group_sizes[group_name] for group_name in tensor_parallel_order]
+        ordered_tensor_parallel_groups = [None, None, None]
+
         # create communicators for intra-layer parallelism
         for i_ in range(G_data):
             for j_ in range(G_inter):
@@ -154,13 +164,14 @@ class communication_handle:
 
                 ranks_in_ith_jth_intra_layer_group = np.array(
                     ranks_in_ith_jth_intra_layer_group
-                ).reshape(G_intra_d, G_intra_r, G_intra_c)
+                    ).reshape(ordered_tensor_parallel_group_sizes[::-1])
                 # form row and column tensor parallel groups
                 # G_intra_d x G_intra_r x G_intra_c
 
+                tp_sizes = ordered_tensor_parallel_group_sizes 
                 # inner
-                for i in range(G_intra_d):
-                    for j in range(G_intra_r):
+                for i in range(tp_sizes[2]):
+                    for j in range(tp_sizes[1]):
                         group_members = list(
                             ranks_in_ith_jth_intra_layer_group[i, j, :]
                         )
@@ -168,11 +179,18 @@ class communication_handle:
                             ranks=group_members, backend="nccl"
                         )
                         if self.world_rank in group_members:
-                            self.inner_intra_layer_parallel_group = group
+                            ordered_tensor_parallel_groups[0] = group
+                        
+                        if tensor_parallel_order[0] == "d":
+                            group = torch.distributed.new_group(
+                                ranks=group_members, backend="nccl"
+                            )
+                            if self.world_rank in group_members:
+                                self.depth_intra_layer_parallel_group_2 = group
 
-                # outer
-                for i in range(G_intra_d):
-                    for j in range(G_intra_c):
+                # middle
+                for i in range(tp_sizes[2]):
+                    for j in range(tp_sizes[0]):
                         group_members = list(
                             ranks_in_ith_jth_intra_layer_group[i, :, j]
                         )
@@ -180,33 +198,38 @@ class communication_handle:
                             ranks=group_members, backend="nccl"
                         )
                         if self.world_rank in group_members:
-                            self.outer_intra_layer_parallel_group = group
+                            ordered_tensor_parallel_groups[1] = group
 
-                # depth
-                for i in range(G_intra_r):
-                    for j in range(G_intra_c):
+                # outer
+                for i in range(tp_sizes[1]):
+                    for j in range(tp_sizes[0]):
                         group_members = list(
                             ranks_in_ith_jth_intra_layer_group[:, i, j]
                         )
                         group = torch.distributed.new_group(
                             ranks=group_members, backend="nccl"
                         )
-                        if self.world_rank in group_members:
-                            self.depth_intra_layer_parallel_group = group
 
-                # combined inner+outer
-                for i in range(G_intra_d):
-                    group_members = list(
-                        ranks_in_ith_jth_intra_layer_group[i, :, :].flatten()
-                    )
-                    group = torch.distributed.new_group(
-                        ranks=group_members, backend="nccl"
-                    )
-                    if self.world_rank in group_members:
-                        self.outer_inner_intra_layer_parallel_group = group
-                        self.outer_inner_intra_layer_parallel_group_root = (
-                            group_members[0]
-                        )
+                        if self.world_rank in group_members:
+                            ordered_tensor_parallel_groups[2] = group
+
+                        if tensor_parallel_order[2] == "d":
+                            group = torch.distributed.new_group(
+                                ranks=group_members, backend="nccl"
+                            )
+                            if self.world_rank in group_members:
+                                self.depth_intra_layer_parallel_group_2 = group
+                        
+                
+                for group_name, group in zip(tensor_parallel_order, ordered_tensor_parallel_groups):
+                    if group_name == "c":
+                        self.inner_intra_layer_parallel_group = group
+                    elif group_name == "r":
+                        self.outer_intra_layer_parallel_group = group
+                    elif group_name == "d":
+                        self.depth_intra_layer_parallel_group = group
+
+
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
         """Converts a PyTorch tensor into an mpi4py compatible array using its

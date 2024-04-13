@@ -43,7 +43,7 @@ def gather(
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
 ALL_GATHER_ITERATOR = None
-ALL_GATHER_DTYPE = torch.float32
+ALL_GATHER_DTYPE = torch.bfloat16
 REDUCE_SCATTER_DTYPE = torch.bfloat16
 handles = []
 pending_grad_accumulations = []
@@ -80,9 +80,9 @@ def accumulate():
     global pending_grad_accumulations
     for param, grad in pending_grad_accumulations:
         if param.grad is None:
-            param.grad = grad
+            param.grad = grad.to(param.dtype)
         else:
-            param.grad.add_(grad)
+            param.grad.add_(grad.to(param.dtype))
 
     pending_grad_accumulations = []
 
@@ -99,7 +99,7 @@ def trigger_async_all_gathers(model):
             weight = module.weight
             if weight not in weights_cache:
                 # only trigger all gathers if not in cache
-                process_group = module.depth_group
+                process_group = ax.comm_handle.depth_intra_layer_parallel_group_2
                 world_size = dist.get_world_size(process_group)
                 if world_size == 1:
                     all_gathered_weight = weight
