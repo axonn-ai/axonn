@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from .fully_connected import Linear  # noqa: F401
 from .conv import Conv2d  # noqa: F401
+from .timers import Timers
 
 from .communication import Drop, Gather
 from .gradient_normalization import clip_grad_norm_  # noqa: F401
@@ -48,6 +49,14 @@ REDUCE_SCATTER_DTYPE = torch.bfloat16
 handles = []
 pending_grad_accumulations = []
 weights_cache = {}
+
+ENABLE_TIMERS=False
+timers = Timers()
+
+def enable_timers():
+    global ENABLE_TIMERS
+    ENABLE_TIMERS = True
+
 
 def set_all_gather_dtype(dtype):
     global ALL_GATHER_DTYPE
