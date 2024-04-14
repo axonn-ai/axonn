@@ -73,7 +73,7 @@ class AsyncLinear(Function):
             weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
         )
         weight = weight.reshape(local_weight_shape)
-        ctx.save_for_backward(input_, weight, original_weight)
+        ctx.save_for_backward(input_, original_weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.backward_comm_async = backward_comm_async
@@ -100,7 +100,11 @@ class AsyncLinear(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output):
-        input_, weight, original_weight = ctx.saved_tensors
+        input_, weight = ctx.saved_tensors
+        weight = _gather(
+            weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
+        )
+
         handle = None
         overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (
