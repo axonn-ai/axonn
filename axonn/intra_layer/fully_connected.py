@@ -102,7 +102,7 @@ class AsyncLinear(Function):
     def backward(ctx, grad_output):
         input_, weight = ctx.saved_tensors
         weight = _gather(
-            weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
+            weight, dim=0, process_group=ctx.depth_parallel_group, cache=False
         )
 
         handle = None
