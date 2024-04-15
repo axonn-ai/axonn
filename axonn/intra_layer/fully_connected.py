@@ -77,6 +77,7 @@ class AsyncLinear(Function):
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.backward_comm_async = backward_comm_async
+        ctx.local_weight_shape = local_weight_shape
         if not forward_comm_async:
             output = input_.matmul(weight.t())
             dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
@@ -104,6 +105,7 @@ class AsyncLinear(Function):
         weight = _gather(
             weight, dim=0, process_group=ctx.depth_parallel_group, cache=False
         )
+        weight = weight.reshape(ctx.local_weight_shape)
 
         handle = None
         overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
