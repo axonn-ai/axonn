@@ -1,34 +1,45 @@
 import torch.nn as nn
 from axonn import axonn as ax
 from axonn.intra_layer import Linear
+from contextlib import contextmanager
 
-
-def auto_parallelize(model):
+def is_parallelizable(in_features, out_features):
     G_row = ax.config.G_intra_r
     G_col = ax.config.G_intra_c
     G_depth = ax.config.G_intra_d
-    # Iterate through all modules in the model
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Module):
-            # Iterate through all child modules of each module
-            for attr_name, attr_module in module.named_children():
-                # Check if the module is a linear layer
-                if isinstance(attr_module, nn.Linear):
-                    # Check if layer is "parallelizable"
-                    if (
-                        (attr_module.out_features % G_row == 0)
-                        and (attr_module.in_features % G_col == 0)
-                        and (
-                            (attr_module.out_features * attr_module.in_features)
-                            / (G_row * G_col)
-                            % G_depth
-                            == 0
-                        )
-                    ):
-                        # Replace the linear layer with Axonn's linear layer
-                        setattr(
-                            module,
-                            attr_name,
-                            Linear(attr_module.in_features, attr_module.out_features),
-                        )
-    return model
+    row_col_condition = out_features % G_row == 0 and in_features % G_col == 0
+    depth_condition = (out_features * in_features // (G_row * G_col)) % G_depth == 0
+    return row_col_condition and depth_condition
+
+class patched_linear:
+    def __new__(cls, in_features, 
+                   out_features, 
+                   bias=True,
+                   device=None,
+                   dtype=None):
+
+        if is_parallelizable(in_features, out_features):
+            parallel_layer =  Linear(in_features, out_features, bias=bias)
+            if device is not None:
+                parallel_layer = parallel_layer.to(device)
+            if dtype is not None:
+                parallel_layer = parallel_layer.to(dtype)
+            return parallel_layer
+        else:
+            sequential_layer = torch.nn.Linear(in_features, out_features, bias=bias)
+            if device is not None:
+                sequential_layer = sequential_layer.to(device)
+            if dtype is not None:
+                sequential_layer = sequential_layer.to(dtype)
+            return sequential_layer
+
+@contextmanager
+def auto_parallelize():
+    old_linear = nn.Linear
+    nn.Linear = patched_linear
+    try:
+        yield None
+    finally:
+        nn.Linear = old_linear
+
+
