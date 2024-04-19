@@ -3,6 +3,7 @@ from axonn import axonn as ax
 from axonn.intra_layer import Linear
 from contextlib import contextmanager
 
+
 def is_parallelizable(in_features, out_features):
     G_row = ax.config.G_intra_r
     G_col = ax.config.G_intra_c
@@ -11,27 +12,24 @@ def is_parallelizable(in_features, out_features):
     depth_condition = (out_features * in_features // (G_row * G_col)) % G_depth == 0
     return row_col_condition and depth_condition
 
-class patched_linear:
-    def __new__(cls, in_features, 
-                   out_features, 
-                   bias=True,
-                   device=None,
-                   dtype=None):
 
+class patched_linear:
+    def __new__(cls, in_features, out_features, bias=True, device=None, dtype=None):
         if is_parallelizable(in_features, out_features):
-            parallel_layer =  Linear(in_features, out_features, bias=bias)
+            parallel_layer = Linear(in_features, out_features, bias=bias)
             if device is not None:
                 parallel_layer = parallel_layer.to(device)
             if dtype is not None:
                 parallel_layer = parallel_layer.to(dtype)
             return parallel_layer
         else:
-            sequential_layer = torch.nn.Linear(in_features, out_features, bias=bias)
+            sequential_layer = nn.Linear(in_features, out_features, bias=bias)
             if device is not None:
                 sequential_layer = sequential_layer.to(device)
             if dtype is not None:
                 sequential_layer = sequential_layer.to(dtype)
             return sequential_layer
+
 
 @contextmanager
 def auto_parallelize():
@@ -41,5 +39,3 @@ def auto_parallelize():
         yield None
     finally:
         nn.Linear = old_linear
-
-
