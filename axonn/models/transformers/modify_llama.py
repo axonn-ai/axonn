@@ -1,6 +1,7 @@
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, ACT2FN
 from axonn.intra_layer import Linear
 from typing import Optional
+from axonn import axonn as ax
 
 
 def modified_attention_init(self, config, layer_idx: Optional[int] = None):
@@ -31,19 +32,40 @@ def modified_attention_init(self, config, layer_idx: Optional[int] = None):
         )
 
     self.q_proj = Linear(
-        self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
+        self.hidden_size,
+        self.num_heads * self.head_dim,
+        bias=config.attention_bias,
+        use_easy_api=False,
     )
     self.k_proj = Linear(
         self.hidden_size,
         self.num_key_value_heads * self.head_dim,
         bias=config.attention_bias,
+        use_easy_api=False,
     )
     self.v_proj = Linear(
         self.hidden_size,
         self.num_key_value_heads * self.head_dim,
         bias=config.attention_bias,
+        use_easy_api=False,
     )
-    self.o_proj = Linear(self.hidden_size, self.hidden_size, bias=config.attention_bias)
+    self.o_proj = Linear(
+        self.hidden_size,
+        self.hidden_size,
+        bias=config.attention_bias,
+        use_easy_api=False,
+        transpose=True,
+    )
+
+    assert self.num_heads % ax.config.G_intra_r == 0
+    self.num_heads //= ax.config.G_intra_r
+
+    assert self.num_key_value_heads % ax.config.G_intra_r == 0
+    self.num_key_value_heads //= ax.config.G_intra_r
+
+    assert self.hidden_size % ax.config.G_intra_r == 0
+    self.hidden_size //= ax.config.G_intra_r
+
     self._init_rope()
 
 
@@ -52,9 +74,19 @@ def modified_mlp_init(self, config):
     self.config = config
     self.hidden_size = config.hidden_size
     self.intermediate_size = config.intermediate_size
-    self.gate_proj = Linear(self.hidden_size, self.intermediate_size, bias=False)
-    self.up_proj = Linear(self.hidden_size, self.intermediate_size, bias=False)
-    self.down_proj = Linear(self.intermediate_size, self.hidden_size, bias=False)
+    self.gate_proj = Linear(
+        self.hidden_size, self.intermediate_size, bias=False, use_easy_api=False
+    )
+    self.up_proj = Linear(
+        self.hidden_size, self.intermediate_size, bias=False, use_easy_api=False
+    )
+    self.down_proj = Linear(
+        self.intermediate_size,
+        self.hidden_size,
+        bias=False,
+        use_easy_api=False,
+        transpose=True,
+    )
     self.act_fn = ACT2FN[config.hidden_act]
 
 
