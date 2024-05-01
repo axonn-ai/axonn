@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
-from axonn import config
 
 try:
     # from mpi4py import MPI
@@ -46,8 +45,7 @@ class communication_handle:
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
         """
-        config.device = device
-        if config.device == "cpu":
+        if device == "cpu":
             self.backend = "gloo"
         else:
             self.backend = "nccl"
@@ -80,7 +78,7 @@ class communication_handle:
             gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
         )
 
-        if config.device == "cuda":
+        if device == "cuda":
             self.local_rank = self.world_rank % self.gpus_per_node
             torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra

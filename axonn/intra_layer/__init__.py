@@ -98,13 +98,20 @@ def trigger_async_all_gathers(model):
                     handle = None
                 else:
                     assert weight.ndim == 1
-                    output_shape = weight.shape[0] * world_size
-                    all_gathered_weight = torch.empty(
-                        output_shape, dtype=weight.dtype, device=weight.device
-                    )
-                    handle = dist.all_gather_into_tensor(
-                        all_gathered_weight, weight, group=process_group, async_op=True
-                    )
+
+                    if torch.distributed.get_backend() == "nccl":
+                        output_shape = weight.shape[0] * world_size
+                        all_gathered_weight = torch.empty(
+                            output_shape, dtype=weight.dtype, device=weight.device
+                        )
+                        handle = dist.all_gather_into_tensor(
+                            all_gathered_weight, weight, group=process_group, async_op=True
+                        )
+
+                    elif torch.distributed.get_backend() == "gloo":
+                        raise NotImplementedError
+
+
                 weights_cache[weight] = [all_gathered_weight, handle]
             yield
 
@@ -173,6 +180,13 @@ def optimize_communication(
                 "for_overlapping_allgathers=model, ...)"
                 "if overlap_all_gather is True"
             )
+
+        if torch.distributed.get_backend() == "gloo":
+            raise ValueError(
+                "overlap_all_gather does not work with gloo"
+                "please set it to false"
+            )
+
         ALL_GATHER_ITERATOR = trigger_async_all_gathers(
             model_object_for_overlapping_allgathers
         )
