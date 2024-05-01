@@ -36,7 +36,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias, device):
         G_intra_d=G_intra_d,
         mixed_precision=False,
         fp16_allreduce=False,
-        device=device
+        device=device,
     )
 
     X = torch.randn(B, H).to(device) * 0.01
@@ -55,7 +55,9 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias, device):
         # manually divide input
 
     layer = Linear(in_features=H, out_features=H, bias=bias).to(device)
-    layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).to(device)
+    layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).to(
+        device
+    )
 
     # test if load state dict works with a sequential checkpoint
     layer.load_state_dict(layer_sequential.state_dict())
@@ -96,8 +98,8 @@ def test_bw_pass(
     device,
 ):
     # These tests are in fp-32
-    if device=="cpu" and G_intra_d > 1:
-        return #Gloo doesnt support reduce scatter
+    if device == "cpu" and G_intra_d > 1:
+        return  # Gloo doesnt support reduce scatter
 
     torch.manual_seed(42)
     ax.init(
@@ -123,7 +125,9 @@ def test_bw_pass(
         out_features=H,
         bias=bias,
     ).to(device)
-    layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).to(device)
+    layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).to(
+        device
+    )
 
     # test if load state dict works with a sequential checkpoint
     layer.load_state_dict(layer_sequential.state_dict())
@@ -146,9 +150,9 @@ def test_bw_pass(
 
     with optimize_communication(
         overlap_all_reduce=comm_opt_level >= 1,
-        overlap_reduce_scatter=comm_opt_level >= 2 and device!='cpu',
+        overlap_reduce_scatter=comm_opt_level >= 2 and device != "cpu",
         cache_weights=comm_opt_level >= 3,
-        overlap_all_gather=comm_opt_level == 4 and device!='cpu',
+        overlap_all_gather=comm_opt_level == 4 and device != "cpu",
         model_object_for_overlapping_allgathers=layer,
     ):
         Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
@@ -193,5 +197,3 @@ def test_bw_pass(
         assert torch.allclose(
             bias_grad_parallel, layer_sequential.bias.grad
         ), "BW Pass - gradients of bias do not match"
-
-
