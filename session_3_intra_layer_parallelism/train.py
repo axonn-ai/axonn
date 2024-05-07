@@ -5,28 +5,25 @@ import os
 from torchvision import transforms
 import numpy as np
 from axonn import axonn as ax
+from axonn.intra_layer import auto_parallelize
+
 from torch.cuda.amp import GradScaler
 import random
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from model.fc_net_easy_tensor_parallel import FC_Net
-from utils import print_memory_stats, num_params, log_dist
+from model.fc_net_sequential import FC_Net
+from utils import print_memory_stats, report_local_and_global_params, log_dist, set_seed
 from args import create_parser
 
 NUM_EPOCHS=2
 PRINT_EVERY=200
 
-seed=123
-
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
 
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+    set_seed(args.seed)
 
     ## Step 1 - Initialize AxoNN
     torch.distributed.init_process_group(backend='nccl')
@@ -40,7 +37,7 @@ if __name__ == "__main__":
                 fp16_allreduce=True,
             )
 
-    log_dist('initialized AxoNN', ranks=[0])
+    log_dist(f'initialized AxoNN with G_intra_r={args.G_intra_r}, G_intra_c={args.G_intra_c}, G_intra_d={args.G_intra_d}', ranks=[0])
 
     augmentations = transforms.Compose(
         [
@@ -59,14 +56,15 @@ if __name__ == "__main__":
     ## Step 3 - Create dataloader using AxoNN
     train_loader = ax.create_dataloader(
         train_dataset,
-        args.batch_size,
-        args.micro_batch_size,
+        global_batch_size=args.batch_size,
         num_workers=1,
     )
 
     ## Step 4 - Create Neural Network 
-    net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
-    params = num_params(net) / 1e9
+    with auto_parallelize():
+        net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
+
+    report_local_and_global_params(net)
 
     ## Step 5 - Create Optimizer 
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
@@ -81,7 +79,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
 
-    log_dist(f"Model Params = {num_params(net)*ax.config.G_intra/1e9} B", [0])
+
     log_dist(f"Start Training with AxoNN's Intra-Layer Parallelism", [0])
 
     for epoch in range(NUM_EPOCHS):

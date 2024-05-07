@@ -11,9 +11,10 @@ DATA_DIR="../data/"
 
 G_INTRA_ROW=2
 G_INTRA_COL=1
+G_INTRA_DEPTH=1
 
 export NCCL_P2P_DISABLE=1 
 export NCCL_IB_DISABLE=1 
 
-torchrun --nproc_per_node 2 train.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64 --G-intra-r ${G_INTRA_ROW} --G-intra-c ${G_INTRA_COL} --G-data 1  --micro-batch-size 4 --checkpoint-activations
+torchrun --nproc_per_node 2 train.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64 --G-intra-r ${G_INTRA_ROW} --G-intra-c ${G_INTRA_COL} --G-intra-d ${G_INTRA_DEPTH} --G-data 1  --micro-batch-size 4 --checkpoint-activations
 

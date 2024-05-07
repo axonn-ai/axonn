@@ -14,4 +14,5 @@ def create_parser():
     parser.add_argument("--G-data", type=int, help="degree of data parallelism", default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--checkpoint-activations", action='store_true', default=False)
+    parser.add_argument("--seed", type=int, default=123456)
     return parser
