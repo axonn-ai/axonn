@@ -195,14 +195,18 @@ def create_dataloader(
     assert is_initialized
     config.micro_batch_size = micro_batch_size
     config.global_batch_size = global_batch_size
-    config.batch_size_per_network_instance = global_batch_size // (config.G_data * config.G_intra_d)
+    config.batch_size_per_network_instance = global_batch_size // (
+        config.G_data * config.G_intra_d
+    )
     assert (
         global_batch_size % (config.G_data * micro_batch_size) == 0
     ), "Batch Size should be divisible by the G_data*micro_batch_size"
 
     sampler = torch.utils.data.distributed.DistributedSampler(
-        dataset, num_replicas = config.G_data*config.G_intra_d, 
-        rank = config.G_intra_d * config.data_parallel_rank + config.intra_layer_depth_parallel_rank
+        dataset,
+        num_replicas=config.G_data * config.G_intra_d,
+        rank=config.G_intra_d * config.data_parallel_rank
+        + config.intra_layer_depth_parallel_rank,
     )
     data_loader = torch.utils.data.DataLoader(
         dataset=dataset,
