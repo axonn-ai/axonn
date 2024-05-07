@@ -171,8 +171,8 @@ def is_zeroth_rank():
 
 def create_dataloader(
     dataset: torch.utils.data.Dataset,
-    batch_size: int,
-    micro_batch_size: int,
+    global_batch_size: int,
+    micro_batch_size: int = 1,
     num_workers: int = 0,
     *args,
     **kwargs,
@@ -183,7 +183,7 @@ def create_dataloader(
 
     Arguments:
         dataset (torch.utils.data.Dataset): a PyTorch dataset object
-        batch_size (int): batch size for dataloading
+        global_batch_size (int): global batch size over all GPUs
         micro_batch_size (int): microbatch size for inter-layer parallelism
         num_workers (int): number of worker processes in the dataloader
 
@@ -194,18 +194,23 @@ def create_dataloader(
     """
     assert is_initialized
     config.micro_batch_size = micro_batch_size
-    config.batch_size = batch_size
-    config.batch_size_per_network = batch_size // config.G_data
+    config.global_batch_size = global_batch_size
+    config.batch_size_per_network_instance = global_batch_size // (
+        config.G_data * config.G_intra_d
+    )
     assert (
-        batch_size % (config.G_data * micro_batch_size) == 0
+        global_batch_size % (config.G_data * micro_batch_size) == 0
     ), "Batch Size should be divisible by the G_data*micro_batch_size"
 
     sampler = torch.utils.data.distributed.DistributedSampler(
-        dataset, num_replicas=config.G_data, rank=config.data_parallel_rank
+        dataset,
+        num_replicas=config.G_data * config.G_intra_d,
+        rank=config.G_intra_d * config.data_parallel_rank
+        + config.intra_layer_depth_parallel_rank,
     )
     data_loader = torch.utils.data.DataLoader(
         dataset=dataset,
-        batch_size=config.batch_size_per_network,
+        batch_size=config.batch_size_per_network_instance,
         shuffle=False,
         num_workers=num_workers,
         sampler=sampler,
