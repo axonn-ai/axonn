@@ -9,7 +9,7 @@ import random
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from model.fc_net_sequential import FC_Net 
-from utils import print_memory_stats, num_params
+from utils import print_memory_stats, num_params, set_seed
 from args import create_parser
 
 NUM_EPOCHS=2
@@ -26,6 +26,7 @@ torch.cuda.manual_seed_all(seed)
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+    set_seed(args.seed)
 
     ## Step 0 - Create a dataset object with transformations
     augmentations = transforms.Compose(
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     ## Step 2 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
 
-    params = num_params(net) / 1e9 
+    params = num_params(net) / 1e6 
     
     ## Step 3 - Create Optimizer
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
@@ -63,7 +64,7 @@ if __name__ == "__main__":
    
     ## Step 5 - Train
     print("Start training ...\n")
-    print(f"Model Size = {params} B")
+    print(f"Model Size = {params} M")
 
     for epoch in range(NUM_EPOCHS):
         epoch_loss = 0

@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from torch.cuda.amp import GradScaler
 
 from model.fc_net_sequential import FC_Net
-from utils import print_memory_stats, num_params
+from utils import print_memory_stats, num_params, set_seed
 from args import create_parser
 
 NUM_EPOCHS=2
@@ -20,6 +20,7 @@ PRINT_EVERY=200
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+    set_seed(args.seed)
     augmentations = transforms.Compose(
         [
             transforms.Resize(args.image_size, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -39,7 +40,7 @@ if __name__ == "__main__":
     
     ## Step 2 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
-    params = num_params(net) / 1e9 
+    params = num_params(net) / 1e6 
     
     ## Step 3 - Create Optimizer and LR scheduler
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
@@ -52,7 +53,7 @@ if __name__ == "__main__":
     stop_event = torch.cuda.Event(enable_timing=True)
    
     print("Start training in mixed-precision ...\n")
-    print(f"Model Size = {params} B")
+    print(f"Model Size = {params} M")
 
     ## Scales the loss prior to the backward pass to prevent underflow of gradients
     scaler = GradScaler()

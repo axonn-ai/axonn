@@ -9,4 +9,5 @@ def create_parser():
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--checkpoint-activations", action='store_true', default=False)
+    parser.add_argument("--seed", type=int, default=123456)
     return parser

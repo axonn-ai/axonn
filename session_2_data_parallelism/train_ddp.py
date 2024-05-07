@@ -13,37 +13,24 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 
 from model.fc_net_sequential import FC_Net
-from utils import print_memory_stats, num_params, log_dist
+from utils import print_memory_stats, num_params, log_dist, set_seed
 from args import create_parser
 
 NUM_EPOCHS=2
 PRINT_EVERY=200
 
 def set_device_and_init_torch_dist():
-    world_rank = MPI.COMM_WORLD.Get_rank()
-    world_size = MPI.COMM_WORLD.Get_size()
-
+    # initialize torch distributed
+    torch.distributed.init_process_group(backend='nccl')
     # assign a unique GPU to each MPI process on a node    
-    local_rank = world_rank % torch.cuda.device_count()
+    local_rank = dist.get_rank() % torch.cuda.device_count()
     torch.cuda.set_device(local_rank)
-
-    init_method = "tcp://"
-    master_ip = os.getenv("MASTER_ADDR", "localhost")
-    master_port = os.getenv("MASTER_PORT", "6000")
-    init_method += master_ip + ":" + master_port
-   
-    # create a process group across all processes 
-    torch.distributed.init_process_group(
-                init_method=init_method,
-                backend="nccl",
-                world_size=world_size,
-                rank=world_rank
-    )
 
 
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
+    set_seed(args.seed)
     
     ## Step 1 - Initialize Pytorch Distributed
     set_device_and_init_torch_dist()
@@ -76,7 +63,7 @@ if __name__ == "__main__":
 
     ## Step 3 - Create Neural Network 
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
-    params = num_params(net) / 1e9 
+    params = num_params(net) / 1e6 
     
     ## Step 4 - Pass model through DDP constructor
     net = DDP(net, device_ids=[torch.cuda.current_device()])
@@ -91,7 +78,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
    
-    log_dist(f"Model Size = {params} B", ranks=[0])
+    log_dist(f"Model Size = {params} M", ranks=[0])
     log_dist("Start training with DDP...\n", [0])
     scaler = GradScaler()
 

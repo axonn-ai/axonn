@@ -7,13 +7,13 @@
 #SBATCH -A isc2023-aac
 
 
-DATA_DIR="/scratch/zt1/project/isc2023/shared/"
+DATA_DIR="../data"
 
-module load gcc/9.4.0 openmpi/gcc
-. /scratch/zt1/project/isc2023/shared/tutorial-venv/bin/activate
+export NCCL_P2P_DISABLE=1 
+export NCCL_IB_DISABLE=1 
 
 
-cmd="mpirun -np 4 python train_deepspeed.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64 --checkpoint-activations --deepspeed_config ./ds_config.json" 
+cmd="torchrun --nproc_per_node 2 train_deepspeed.py --num-layers 4 --hidden-size 2048 --data-dir ${DATA_DIR} --batch-size 32 --lr 0.0001 --image-size 64 --checkpoint-activations --deepspeed_config ./ds_config.json" 
 
 echo "${cmd}"
 

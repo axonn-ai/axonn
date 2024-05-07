@@ -9,7 +9,7 @@ import deepspeed
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from model.fc_net_sequential import FC_Net
-from utils import print_memory_stats, num_params, log_dist
+from utils import print_memory_stats, num_params, log_dist, set_seed
 from args import create_parser
 
 NUM_EPOCHS=2
@@ -22,6 +22,7 @@ if __name__ == "__main__":
     ## deepspeed requires us to add this arg
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
+    set_seed(args.seed)
 
     ## Step 1 - Initialize DeepSpeed Distributed
     deepspeed.init_distributed()
@@ -44,13 +45,10 @@ if __name__ == "__main__":
     ## Step 3 - Create Neural Network and optimizer
     net = FC_Net(args.num_layers, args.image_size**2, args.hidden_size, 10).cuda()
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
-    params = num_params(net) / 1e9 
+    params = num_params(net) / 1e6
    
 
     ## Step 4 - Create model, optimizer, trainloader
-
-    ## needs to be set manually when using mpirun
-    args.local_rank = int(os.environ.get("LOCAL_RANK"))
     
     model_engine, optimizer, train_loader, __ = deepspeed.initialize(
         args=args, model=net, optimizer=optimizer, training_data=train_dataset)
@@ -63,7 +61,7 @@ if __name__ == "__main__":
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
    
-    log_dist(f"Model Size = {params} B", ranks=[0])
+    log_dist(f"Model Size = {params} M", ranks=[0])
     log_dist(f"Start training with DeepSpeed \n", [0])
 
     for epoch in range(NUM_EPOCHS):
