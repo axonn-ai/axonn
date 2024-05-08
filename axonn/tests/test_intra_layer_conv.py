@@ -53,6 +53,9 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, dev
     # This is required because TF32 cores only look at the first 10 bits of mantissa
     torch.backends.cudnn.allow_tf32 = False
 
+    if device == "cpu" and G_intra_d > 1:
+        return  # Gloo doesnt support reduce scatter
+
     ax.init(
         G_data=1,
         G_inter=1,
