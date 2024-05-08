@@ -163,6 +163,11 @@ def init(
     if device == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA is not available. Please choose a different device.")
 
+    if device == "cpu":
+        assert (
+            G_intra_d == 1
+        ), "G_intra_d > 1: Intra_d uses reduce-scatters which gloo for cpus doesn't support"
+
     if mixed_precision:
         computation_dtype = torch.float16
     else:
