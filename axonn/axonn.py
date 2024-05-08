@@ -166,7 +166,7 @@ def init(
     if device == "cpu":
         assert (
             G_intra_d == 1
-        ), "G_intra_d > 1: Intra_d uses reduce-scatters which gloo for cpus doesn't support"
+        ), "G_intra_d > 1: Intra_d uses reduce-scatters which gloo(cpu) doesn't support"
 
     if mixed_precision:
         computation_dtype = torch.float16
