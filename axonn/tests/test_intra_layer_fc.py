@@ -44,7 +44,9 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
         )  # divide colunns of X along the inner tensor group
         # manually divide input
 
-    layer = Linear(in_features=H, out_features=H, bias=bias).cuda()
+    layer = Linear(
+        in_features=H, out_features=H, bias=bias, use_easy_api=easy_tp
+    ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
     # test if load state dict works with a sequential checkpoint
@@ -54,7 +56,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
 
     with torch.no_grad():
         # parallel FW pass
-        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 0, depth_group)
         if not easy_tp:  # gather output manually
             Y_parallel = _gather(Y_local.clone(), 1, outer_group)
@@ -101,9 +103,7 @@ def test_bw_pass(
 
     # parallel backward pass
     layer = Linear(
-        in_features=H,
-        out_features=H,
-        bias=bias,
+        in_features=H, out_features=H, bias=bias, use_easy_api=easy_tp
     ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
@@ -133,7 +133,7 @@ def test_bw_pass(
         overlap_all_gather=comm_opt_level == 4,
         model_object_for_overlapping_allgathers=layer,
     ):
-        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local = layer(X_local)
         Y_local.backward(Y_local_grad)
 
     sync_gradients(layer)
