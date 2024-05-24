@@ -69,7 +69,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias, device):
 
     with torch.no_grad():
         # parallel FW pass
-        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 0, depth_group)
         if not easy_tp:  # gather output manually
             Y_parallel = _gather(Y_local.clone(), 1, outer_group)
@@ -158,7 +158,7 @@ def test_bw_pass(
         overlap_all_gather=comm_opt_level == 4 and device != "cpu",
         model_object_for_overlapping_allgathers=layer,
     ):
-        Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
+        Y_local = layer(X_local)
         Y_local.backward(Y_local_grad)
 
     sync_gradients(layer)

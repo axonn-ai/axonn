@@ -5,6 +5,14 @@ from .modify_llama import (
     monkey_patch_llama_with_axonn,
     reverse_monkey_patch_llama_with_axonn,
 )
+from .modify_mixtral import (
+    monkey_patch_mixtral_with_axonn,
+    reverse_monkey_patch_mixtral_with_axonn,
+)
+from .modify_mistral import (
+    monkey_patch_mistral_with_axonn,
+    reverse_monkey_patch_mistral_with_axonn,
+)
 
 modify_dict = {
     "OPTForCausalLM": (
@@ -14,6 +22,14 @@ modify_dict = {
     "LlamaForCausalLM": (
         monkey_patch_llama_with_axonn,
         reverse_monkey_patch_llama_with_axonn,
+    ),
+    "MixtralForCausalLM": (
+        monkey_patch_mixtral_with_axonn,
+        reverse_monkey_patch_mixtral_with_axonn,
+    ),
+    "MistralForCausalLM": (
+        monkey_patch_mistral_with_axonn,
+        reverse_monkey_patch_mistral_with_axonn,
     ),
 }
 
