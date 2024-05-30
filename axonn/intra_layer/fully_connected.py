@@ -169,6 +169,7 @@ class Linear(torch.nn.Module):
         bias=True,
         skip_bias_add=False,
         init_method=None,
+        use_easy_api=True,
         **kwargs
     ):
         super(Linear, self).__init__()
@@ -182,6 +183,7 @@ class Linear(torch.nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.use_easy_api = use_easy_api
 
         if init_method is None:
             init_method = default_init_method
@@ -257,8 +259,6 @@ class Linear(torch.nn.Module):
     def forward(
         self,
         x,
-        scatter_input=True,
-        gather_output=True,
         cache_weights_in_all_gather=False,
     ):
         # gather weights from depth parallel group
@@ -266,7 +266,7 @@ class Linear(torch.nn.Module):
 
         weight = self.weight
         if not self.transpose:
-            if scatter_input:
+            if self.use_easy_api:
                 x = Drop.apply(x, self.inner_group)
             x = AsyncLinear.apply(
                 x,
@@ -279,10 +279,10 @@ class Linear(torch.nn.Module):
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
-            if gather_output:
+            if self.use_easy_api:
                 x = Gather.apply(x, self.outer_group)
         else:
-            if scatter_input:
+            if self.use_easy_api:
                 x = Drop.apply(x, self.outer_group)
 
             x = AsyncLinear.apply(
@@ -296,14 +296,14 @@ class Linear(torch.nn.Module):
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
-            if gather_output:
+            if self.use_easy_api:
                 x = Gather.apply(x, self.inner_group)
 
         if self.bias is None:
             return x
         else:
             bias = self.bias
-            if gather_output:
+            if self.use_easy_api:
                 bias = Gather.apply(
                     bias,
                     self.outer_group if not self.transpose else self.inner_group,

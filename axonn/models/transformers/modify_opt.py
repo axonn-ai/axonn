@@ -1,6 +1,7 @@
 from transformers.models.opt.modeling_opt import OPTAttention, OPTDecoderLayer, ACT2FN
 import torch.nn as nn
 from axonn.intra_layer import Linear
+from axonn import axonn as ax
 
 
 def modified_attention_init(
@@ -25,10 +26,15 @@ def modified_attention_init(
     self.scaling = self.head_dim**-0.5
     self.is_decoder = is_decoder
 
-    self.k_proj = Linear(embed_dim, embed_dim, bias=bias)
-    self.v_proj = Linear(embed_dim, embed_dim, bias=bias)
-    self.q_proj = Linear(embed_dim, embed_dim, bias=bias)
-    self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+    self.k_proj = Linear(embed_dim, embed_dim, bias=bias, easy_api=False)
+    self.v_proj = Linear(embed_dim, embed_dim, bias=bias, easy_api=False)
+    self.q_proj = Linear(embed_dim, embed_dim, bias=bias, easy_api=False)
+    self.out_proj = Linear(
+        embed_dim, embed_dim, bias=bias, easy_api=False, transpose=True
+    )
+
+    assert self.num_heads % ax.config.G_intra_r == 0
+    self.num_heads //= ax.config.G_intra_r
 
 
 def modified_decoder_init(self, config):
@@ -48,8 +54,16 @@ def modified_decoder_init(self, config):
     self.self_attn_layer_norm = nn.LayerNorm(
         self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine
     )
-    self.fc1 = Linear(self.embed_dim, config.ffn_dim, bias=config.enable_bias)
-    self.fc2 = Linear(config.ffn_dim, self.embed_dim, bias=config.enable_bias)
+    self.fc1 = Linear(
+        self.embed_dim, config.ffn_dim, bias=config.enable_bias, easy_api=False
+    )
+    self.fc2 = Linear(
+        config.ffn_dim,
+        self.embed_dim,
+        bias=config.enable_bias,
+        easy_api=False,
+        transpose=True,
+    )
     self.final_layer_norm = nn.LayerNorm(
         self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine
     )
