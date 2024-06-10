@@ -7,6 +7,7 @@ import torch
 from . import config
 import os
 
+
 def get_prefix_for_checkpoint():
     row_tp_rank = config.intra_layer_row_parallel_rank
     column_tp_rank = config.intra_layer_column_parallel_rank
