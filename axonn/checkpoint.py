@@ -1,16 +1,11 @@
+# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch
 from . import config
 import os
-
-# config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
-# config.data_parallel_rank = comm_handle.data_parallel_rank
-# config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
-# config.intra_layer_depth_parallel_rank = comm_handle.intra_layer_depth_parallel_rank
-# config.intra_layer_row_parallel_rank = comm_handle.intra_layer_row_parallel_rank
-# config.intra_layer_column_parallel_rank = (
-#    comm_handle.intra_layer_column_parallel_rank
-# )
-
 
 def get_prefix_for_checkpoint():
     row_tp_rank = config.intra_layer_row_parallel_rank
