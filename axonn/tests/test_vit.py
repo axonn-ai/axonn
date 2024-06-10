@@ -70,7 +70,7 @@ def test_vit_mnist():
     for epoch_number in range(epochs):
         epoch_loss = 0
         for x, y in tqdm(train_loader, disable=True):
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=False)
             if ilp_rank == 0:
                 x, y = x.cuda(), y.cuda()
             if G_inter > 1:
