@@ -1,33 +1,41 @@
 import torch
 from . import config
 import os
-from .axonn import model_params_fp16, model_params_fp32, model
+
+# config.inter_layer_parallel_rank = comm_handle.inter_layer_parallel_rank
+# config.data_parallel_rank = comm_handle.data_parallel_rank
+# config.intra_layer_parallel_rank = comm_handle.intra_layer_parallel_rank
+# config.intra_layer_depth_parallel_rank = comm_handle.intra_layer_depth_parallel_rank
+# config.intra_layer_row_parallel_rank = comm_handle.intra_layer_row_parallel_rank
+# config.intra_layer_column_parallel_rank = (
+#    comm_handle.intra_layer_column_parallel_rank
+# )
 
 
-def save_model_and_optimizer(model, optimizer, checkpoint_folder):
-    inter_rank = config.inter_layer_parallel_rank
-    intra_rank = config.intra_layer_parallel_rank
-    data_rank = config.data_parallel_rank
-
-    if intra_rank == 0 and data_rank == 0:
-        model_path = os.path.join(checkpoint_folder, f"model_{inter_rank}.pt")
-        optim_path = os.path.join(checkpoint_folder, f"optim_{inter_rank}.pt")
-        torch.save(model.state_dict(), model_path)
-        torch.save(optimizer.state_dict(), optim_path)
+def get_prefix_for_checkpoint():
+    row_tp_rank = config.intra_layer_row_parallel_rank
+    column_tp_rank = config.intra_layer_column_parallel_rank
+    depth_tp_rank = config.intra_layer_depth_parallel_rank
+    return f"tp_row_{row_tp_rank}_col_{column_tp_rank}_depth_{depth_tp_rank}"
 
 
-def load_model(model, checkpoint_folder):
-    inter_rank = config.inter_layer_parallel_rank
+def save(state, checkpoint_folder, checkpoint_name, overwrite=True):
+    if config.data_parallel_rank == 0:
+        checkpoint_folder = os.path.join(checkpoint_folder, get_prefix_for_checkpoint())
+        if not os.path.exists(checkpoint_folder):
+            os.makedirs(checkpoint_folder)
+        checkpoint_file = os.path.join(checkpoint_folder, f"{checkpoint_name}.pt")
+        if os.path.exists(checkpoint_file) and not overwrite:
+            raise ValueError(f"Checkpoint {checkpoint_file} already exists")
+        torch.save(state, checkpoint_file)
 
-    model_path = os.path.join(checkpoint_folder, f"model_{inter_rank}.pt")
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
-    return model
 
-
-def load_optimizer(optimizer, checkpoint_folder):
-    inter_rank = config.inter_layer_parallel_rank
-    optim_path = os.path.join(checkpoint_folder, f"optim_{inter_rank}.pt")
-    optimizer.load_state_dict(torch.load(optim_path, map_location="cpu"))
-    if model is not None:
-        model_params_fp16.copy_(model_params_fp32)
-    return optimizer
+def load(state, checkpoint_folder, checkpoint_name):
+    assert os.path.isdir(
+        checkpoint_folder
+    ), f"folder {checkpoint_folder} does not exist"
+    checkpoint_file = os.path.join(
+        checkpoint_folder, f"{get_prefix_for_checkpoint()}_{checkpoint_name}.pt"
+    )
+    torch.load(checkpoint_file)
+    return state
