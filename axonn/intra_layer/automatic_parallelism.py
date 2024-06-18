@@ -3,6 +3,8 @@ from axonn import axonn as ax
 from axonn.intra_layer import Linear
 from contextlib import contextmanager
 
+reference_to_original_linear_class = nn.Linear
+
 
 def is_parallelizable(in_features, out_features):
     G_row = ax.config.G_intra_r
@@ -23,7 +25,9 @@ class patched_linear:
                 parallel_layer = parallel_layer.to(dtype)
             return parallel_layer
         else:
-            sequential_layer = nn.Linear(in_features, out_features, bias=bias)
+            sequential_layer = reference_to_original_linear_class(
+                in_features, out_features, bias=bias
+            )
             if device is not None:
                 sequential_layer = sequential_layer.to(device)
             if dtype is not None:
@@ -33,9 +37,8 @@ class patched_linear:
 
 @contextmanager
 def auto_parallelize():
-    old_linear = nn.Linear
     nn.Linear = patched_linear
     try:
         yield None
     finally:
-        nn.Linear = old_linear
+        nn.Linear = reference_to_original_linear_class
