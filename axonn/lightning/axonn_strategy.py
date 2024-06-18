@@ -63,10 +63,10 @@ class AxonnStrategy(ParallelStrategy):
             precision=precision,
         )
 
-        assert G_data == 1, "Data Paralellism not Supported in AxoNNStrategy"
+        assert G_data == 1, "Data Parallelism not Supported in AxoNNStrategy"
         assert (
             G_inter == 1
-        ), "Inter-layer (or pipeline) Paralellism not Supported in AxoNNStrategy"
+        ), "Inter-layer (or pipeline) Parallellism not Supported in AxoNNStrategy"
         self._num_nodes = 1
         self._process_group_backend: Optional[str] = process_group_backend
         self._timeout: Optional[timedelta] = timeout
