@@ -1,3 +1,8 @@
+# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Union
 
@@ -29,6 +34,7 @@ from lightning.fabric.utilities.distributed import (
 from lightning.fabric.utilities.distributed import group as _group
 from lightning.fabric.utilities.rank_zero import rank_zero_only
 from axonn import axonn as ax
+from axonn.intra_layer import sync_gradients
 
 
 class AxonnStrategy(ParallelStrategy):
@@ -57,8 +63,11 @@ class AxonnStrategy(ParallelStrategy):
             precision=precision,
         )
 
+        assert G_data == 1, "Data Paralellism not Supported in AxoNNStrategy"
+        assert (
+            G_inter == 1
+        ), "Inter-layer (or pipeline) Paralellism not Supported in AxoNNStrategy"
         self._num_nodes = 1
-
         self._process_group_backend: Optional[str] = process_group_backend
         self._timeout: Optional[timedelta] = timeout
         self.G_data = G_data
@@ -66,7 +75,7 @@ class AxonnStrategy(ParallelStrategy):
         self.G_intra_r = G_intra_r
         self.G_intra_c = G_intra_c
         self.G_intra_d = G_intra_d
-        self._kwargs = kwargs
+        self._axonn_kwargs = kwargs
 
     @property
     @override
@@ -185,3 +194,35 @@ class AxonnStrategy(ParallelStrategy):
 
     def _determine_device_ids(self) -> Optional[List[int]]:
         return None if self.root_device.type == "cpu" else [self.root_device.index]
+
+    @override
+    def backward(
+        self, tensor: Tensor, module: Optional[Module] = None, *args: Any, **kwargs: Any
+    ) -> None:
+        super().backward(tensor / self.G_intra_d, module, *args, **kwargs)
+        if self.G_intra_d > 1:
+            assert module is not None, (
+                "When using G_intra_d > 1 with AxoNN,"
+                " you need to pass the model in fabric.backward(model=..)"
+            )
+            sync_gradients(module)
+
+    def save_checkpoint(
+        self,
+        *args,
+        **kwargs,
+    ) -> None:
+        assert False, (
+            "Current fabric.save(..) is not supported with the "
+            "AxoNN strategy. Use axonn.save instead."
+        )
+
+    def load_checkpoint(
+        self,
+        *args,
+        **kwargs,
+    ) -> None:
+        assert False, (
+            "Current fabric.load(..) is not supported with the"
+            " AxoNN strategy. Use axonn.load instead."
+        )

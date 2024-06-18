@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 reference_to_original_linear_class = nn.Linear
 
+
 def is_parallelizable(in_features, out_features):
     G_row = ax.config.G_intra_r
     G_col = ax.config.G_intra_c
@@ -24,7 +25,9 @@ class patched_linear:
                 parallel_layer = parallel_layer.to(dtype)
             return parallel_layer
         else:
-            sequential_layer = reference_to_original_linear_class(in_features, out_features, bias=bias)
+            sequential_layer = reference_to_original_linear_class(
+                in_features, out_features, bias=bias
+            )
             if device is not None:
                 sequential_layer = sequential_layer.to(device)
             if dtype is not None:
