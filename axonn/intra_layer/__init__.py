@@ -72,9 +72,9 @@ def accumulate():
     global pending_grad_accumulations
     for param, grad in pending_grad_accumulations:
         if param.grad is None:
-            param.grad = grad
+            param.grad = grad.to(param.dtype)
         else:
-            param.grad.add_(grad)
+            param.grad.add_(grad.to(param.dtype))
 
     pending_grad_accumulations = []
 
@@ -204,7 +204,9 @@ def optimize_communication(
 
 
 @torch.no_grad()
-def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False):
+def sync_gradients(
+    model, gradient_attr_name="grad", mean=False, vectorize=False, mean_weight=None
+):
     grads_to_sync = []
     for param in model.parameters():
         if param.requires_grad:
@@ -239,6 +241,13 @@ def sync_gradients(model, gradient_attr_name="grad", mean=False, vectorize=False
             old_tensor.data = new_tensor
     else:
         for grad in grads_to_sync:
-            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
             if mean:
-                grad.div_(world_size)
+                if mean_weight is None:
+                    grad.div_(world_size)
+                else:
+                    mean_weight_pt = torch.tensor(
+                        [mean_weight], device="cuda", dtype=torch.float32
+                    )
+                    dist.all_reduce(mean_weight_pt)
+                    grad.mul_(mean_weight).div_(mean_weight_pt)
+            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)

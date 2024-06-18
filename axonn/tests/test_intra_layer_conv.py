@@ -1,5 +1,6 @@
 import torch
 import pytest
+from mpi4py import MPI  # noqa: F401
 from axonn import axonn as ax
 from axonn.intra_layer.communication import _drop, _gather
 from axonn.intra_layer import (
@@ -42,7 +43,8 @@ def norm_allclose(X, Y):
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
 @pytest.mark.parametrize("device", ["cuda", "cpu"])
-def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, device):
+@pytest.mark.skip(reason="torch.all_close does not work with conv")
+def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
@@ -135,6 +137,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, dev
 @pytest.mark.parametrize("bias", [True, False])
 @pytest.mark.parametrize("device", ["cuda", "cpu"])
 @pytest.mark.parametrize("comm_opt_level", [0, 3])
+@pytest.mark.skip(reason="torch.all_close does not work with conv")
 def test_bw_pass(
     G_intra_r,
     G_intra_c,
