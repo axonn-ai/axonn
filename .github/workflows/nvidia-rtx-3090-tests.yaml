@@ -21,7 +21,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install AxoNN
       run: |
-        pip install -r requirements.txt
+        pip install -e .
     - name: Download dataset
       run: |
         python -c "import torchvision; torchvision.datasets.MNIST(root=\"./axonn/tests\", download=True, train=True)"
@@ -44,7 +44,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Install AxoNN
       run: |
-        pip install -r requirements.txt
+        pip install -e .
     - name: Run intra-layer FC unit tests 
       run: |
         mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
