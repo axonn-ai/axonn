@@ -4,11 +4,13 @@
 Advanced Usage
 **************
 
-Parallelizing Your Model with AxoNN's Pipeline Parallelism
+The Advanced Tensor Parallel API
 ==========================================================
 
-
 Combining AxoNN's Tensor Parallelism with Data Parallelism
+==========================================================
+
+Parallelizing Your Model with AxoNN's Pipeline Parallelism
 ==========================================================
 
 
