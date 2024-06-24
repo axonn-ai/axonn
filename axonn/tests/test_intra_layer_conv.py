@@ -7,7 +7,7 @@ from axonn.intra_layer import (
     Conv2d,
     optimize_communication,
     clear_weights_cache,
-    sync_gradients,
+    sync_gradients_depth_parallel,
 )
 import math
 import torch.distributed as dist
@@ -185,7 +185,7 @@ def test_bw_pass(
         Y_local.backward(Y_local_grad)
 
     if not easy_tp:
-        sync_gradients(layer)
+        sync_gradients_depth_parallel(layer)
     if comm_opt_level >= 3:
         clear_weights_cache()
 

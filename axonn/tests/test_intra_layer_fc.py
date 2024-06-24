@@ -7,7 +7,7 @@ from axonn.intra_layer import (
     clip_grad_norm_,
     optimize_communication,
     clear_weights_cache,
-    sync_gradients,
+    sync_gradients_depth_parallel,
 )
 
 
@@ -136,7 +136,7 @@ def test_bw_pass(
         Y_local = layer(X_local)
         Y_local.backward(Y_local_grad)
 
-    sync_gradients(layer)
+    sync_gradients_depth_parallel(layer)
     if comm_opt_level >= 3:
         clear_weights_cache()
     # sequential backward pass
