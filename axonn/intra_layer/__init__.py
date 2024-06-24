@@ -266,9 +266,6 @@ def sync_gradients_data_parallel(
 
         global_grad = _flatten_dense_tensors(grads_to_sync)
         dist.all_reduce(global_grad, group=ax.comm_handle.data_parallel_group)
-        if mean:
-            global_grad.div_(world_size)
-
         for old_tensor, new_tensor in zip(
             grads_to_sync, _unflatten_dense_tensors(global_grad, grads_to_sync)
         ):
