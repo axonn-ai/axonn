@@ -4,13 +4,15 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, ContextManager
+from contextlib import nullcontext
 
 import torch
 import torch.distributed
 from lightning_utilities.core.rank_zero import rank_zero_only as utils_rank_zero_only
 from torch import Tensor
 from torch.nn import Module
+from torch.optim import Optimizer
 from typing_extensions import override
 
 from lightning.fabric.accelerators.accelerator import Accelerator
@@ -31,11 +33,12 @@ from lightning.fabric.utilities.distributed import (
     _init_dist_connection,
     _sync_ddp_if_available,
 )
+from lightning.fabric.strategies.strategy import TBroadcast, _BackwardSyncControl
 from lightning.fabric.utilities.distributed import group as _group
 from lightning.fabric.utilities.rank_zero import rank_zero_only
-from axonn import axonn as ax
-from axonn.intra_layer import sync_gradients
 
+from axonn import axonn as ax
+from axonn.intra_layer import sync_gradients_data_parallel, sync_gradients_depth_parallel, clip_grad_norm_, no_grad_sync
 
 class AxonnStrategy(ParallelStrategy):
 
@@ -48,8 +51,6 @@ class AxonnStrategy(ParallelStrategy):
         precision: Optional[Precision] = None,
         process_group_backend: Optional[str] = None,
         timeout: Optional[timedelta] = default_pg_timeout,
-        G_data: int = 1,
-        G_inter: int = 1,
         G_intra_r: int = 1,
         G_intra_c: int = 1,
         G_intra_d: int = 1,
@@ -63,19 +64,14 @@ class AxonnStrategy(ParallelStrategy):
             precision=precision,
         )
 
-        assert G_data == 1, "Data Parallelism not Supported in AxoNNStrategy"
-        assert (
-            G_inter == 1
-        ), "Inter-layer (or pipeline) Parallellism not Supported in AxoNNStrategy"
         self._num_nodes = 1
         self._process_group_backend: Optional[str] = process_group_backend
         self._timeout: Optional[timedelta] = timeout
-        self.G_data = G_data
-        self.G_inter = G_inter
         self.G_intra_r = G_intra_r
         self.G_intra_c = G_intra_c
         self.G_intra_d = G_intra_d
         self._axonn_kwargs = kwargs
+        self._backward_sync_control = _AxoNNBackwardSyncControl()
 
     @property
     @override
@@ -169,10 +165,13 @@ class AxonnStrategy(ParallelStrategy):
         _init_dist_connection(
             self.cluster_environment, self._process_group_backend, timeout=self._timeout
         )
+        tensor_parallel_world_size = self.G_intra_c * self.G_intra_r * self.G_intra_d
+        assert torch.distributed.get_world_size() %  tensor_parallel_world_size == 0
+        self.G_data = torch.distributed.get_world_size() // tensor_parallel_world_size
 
         ax.init(
             G_data=self.G_data,
-            G_inter=self.G_inter,
+            G_inter=1,
             G_intra_r=self.G_intra_r,
             G_intra_c=self.G_intra_c,
             G_intra_d=self.G_intra_d,
@@ -199,13 +198,15 @@ class AxonnStrategy(ParallelStrategy):
     def backward(
         self, tensor: Tensor, module: Optional[Module] = None, *args: Any, **kwargs: Any
     ) -> None:
-        super().backward(tensor / self.G_intra_d, module, *args, **kwargs)
+        super().backward(tensor, module, *args, **kwargs)
         if self.G_intra_d > 1:
             assert module is not None, (
                 "When using G_intra_d > 1 with AxoNN,"
                 " you need to pass the model in fabric.backward(model=..)"
             )
-            sync_gradients(module)
+            sync_gradients_depth_parallel(module, mean=True)
+        if self.G_data > 1:
+            sync_gradients_data_parallel(module, mean=True)
 
     def save_checkpoint(
         self,
@@ -226,3 +227,30 @@ class AxonnStrategy(ParallelStrategy):
             "Current fabric.load(..) is not supported with the"
             " AxoNN strategy. Use axonn.load instead."
         )
+
+    def clip_gradients_norm(
+        self,
+        module: Module,
+        optimizer: Optimizer,
+        max_norm: Union[float, int],
+        norm_type: Union[float, int] = 2.0,
+        error_if_nonfinite: bool = True,
+    ) -> Tensor:
+        self.precision.unscale_gradients(optimizer)
+        parameters = self.precision.main_params(optimizer)
+        grad_norm = clip_grad_norm_(
+            parameters=parameters,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            error_if_nonfinite=error_if_nonfinite,
+        )
+        return grad_norm
+
+class _AxoNNBackwardSyncControl(_BackwardSyncControl):
+    @override
+    def no_backward_sync(self, module: Module, enabled: bool) -> ContextManager:
+        """Blocks gradient synchronization inside AxoNN"""
+        if not enabled:
+            return nullcontext()
+
+        return no_grad_sync()

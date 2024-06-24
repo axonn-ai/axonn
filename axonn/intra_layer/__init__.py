@@ -44,6 +44,7 @@ def gather(
 OVERLAP_REDUCE_SCATTER = False
 OVERLAP_ALL_REDUCE = False
 ALL_GATHER_ITERATOR = None
+NO_GRADIENT_SYNC = False
 handles = []
 pending_grad_accumulations = []
 weights_cache = {}
@@ -188,15 +189,30 @@ def optimize_communication(
         ALL_GATHER_ITERATOR = None
 
 
+@contextmanager
+def no_grad_sync():
+    global NO_GRADIENT_SYNC
+    old_val = NO_GRADIENT_SYNC
+    try:
+        NO_GRADIENT_SYNC = True
+    finally:
+        NO_GRADIENT_SYNC = old_val
+
+
 @torch.no_grad()
-def sync_gradients(
-    model, gradient_attr_name="grad", mean=False, vectorize=False, mean_weight=None
+def sync_gradients_depth_parallel(
+    model, gradient_attr_name="grad", mean=False, vectorize=False 
 ):
+    if NO_GRADIENT_SYNC:
+        return
     grads_to_sync = []
+    world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
     for param in model.parameters():
         if param.requires_grad:
             grad = getattr(param, gradient_attr_name)
             if grad is not None:
+                if mean:
+                    grad.div_(world_size)
                 if hasattr(param, "is_tensor_parallel") and param.is_tensor_parallel:
                     if (
                         hasattr(param, "needs_gradient_sync")
@@ -209,13 +225,48 @@ def sync_gradients(
     if not grads_to_sync:
         return
 
-    world_size = dist.get_world_size(ax.comm_handle.depth_intra_layer_parallel_group)
     if vectorize:
         from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
         global_grad = _flatten_dense_tensors(grads_to_sync)
         dist.all_reduce(
             global_grad, group=ax.comm_handle.depth_intra_layer_parallel_group
+        )
+
+        for old_tensor, new_tensor in zip(
+            grads_to_sync, _unflatten_dense_tensors(global_grad, grads_to_sync)
+        ):
+            old_tensor.data = new_tensor
+    else:
+        for grad in grads_to_sync:
+            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
+
+
+@torch.no_grad()
+def sync_gradients_data_parallel(
+    model, gradient_attr_name="grad", mean=False, vectorize=False
+):
+    if NO_GRADIENT_SYNC:
+        return
+    grads_to_sync = []
+    world_size = dist.get_world_size(ax.comm_handle.data_parallel_group)
+    for param in model.parameters():
+        if param.requires_grad:
+            grad = getattr(param, gradient_attr_name)
+            if grad is not None:
+                if mean:
+                    grad.div_(world_size)
+                grads_to_sync.append(grad)
+
+    if not grads_to_sync:
+        return
+
+    if vectorize:
+        from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
+        global_grad = _flatten_dense_tensors(grads_to_sync)
+        dist.all_reduce(
+            global_grad, group=ax.comm_handle.data_parallel_group
         )
         if mean:
             global_grad.div_(world_size)
@@ -226,13 +277,4 @@ def sync_gradients(
             old_tensor.data = new_tensor
     else:
         for grad in grads_to_sync:
-            if mean:
-                if mean_weight is None:
-                    grad.div_(world_size)
-                else:
-                    mean_weight_pt = torch.tensor(
-                        [mean_weight], device="cuda", dtype=torch.float32
-                    )
-                    dist.all_reduce(mean_weight_pt)
-                    grad.mul_(mean_weight).div_(mean_weight_pt)
-            dist.all_reduce(grad, group=ax.comm_handle.depth_intra_layer_parallel_group)
+            dist.all_reduce(grad, group=ax.comm_handle.data_parallel_group)

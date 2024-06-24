@@ -134,6 +134,7 @@ class communication_handle:
                 )
                 if self.world_rank in ranks_in_ith_jth_data_parallel_group:
                     self.coll_nccl_comm = ith_jth_data_parallel_group
+                    self.data_parallel_group = ith_jth_data_parallel_group
 
         # create communicators for intra-layer parallelism
         for i_ in range(G_data):
