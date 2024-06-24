@@ -25,7 +25,7 @@ from lightning.fabric.strategies.launchers.subprocess_script import (
 )
 from lightning.fabric.strategies.parallel import ParallelStrategy
 from lightning.fabric.strategies.registry import _StrategyRegistry
-from lightning.fabric.strategies.strategy import TBroadcast
+from lightning.fabric.strategies.strategy import TBroadcast, _BackwardSyncControl
 from lightning.fabric.utilities.distributed import (
     ReduceOp,
     _distributed_is_initialized,
@@ -33,12 +33,17 @@ from lightning.fabric.utilities.distributed import (
     _init_dist_connection,
     _sync_ddp_if_available,
 )
-from lightning.fabric.strategies.strategy import TBroadcast, _BackwardSyncControl
 from lightning.fabric.utilities.distributed import group as _group
 from lightning.fabric.utilities.rank_zero import rank_zero_only
 
 from axonn import axonn as ax
-from axonn.intra_layer import sync_gradients_data_parallel, sync_gradients_depth_parallel, clip_grad_norm_, no_grad_sync
+from axonn.intra_layer import (
+    sync_gradients_data_parallel,
+    sync_gradients_depth_parallel,
+    clip_grad_norm_,
+    no_grad_sync,
+)
+
 
 class AxonnStrategy(ParallelStrategy):
 
@@ -166,7 +171,7 @@ class AxonnStrategy(ParallelStrategy):
             self.cluster_environment, self._process_group_backend, timeout=self._timeout
         )
         tensor_parallel_world_size = self.G_intra_c * self.G_intra_r * self.G_intra_d
-        assert torch.distributed.get_world_size() %  tensor_parallel_world_size == 0
+        assert torch.distributed.get_world_size() % tensor_parallel_world_size == 0
         self.G_data = torch.distributed.get_world_size() // tensor_parallel_world_size
 
         ax.init(
@@ -245,6 +250,7 @@ class AxonnStrategy(ParallelStrategy):
             error_if_nonfinite=error_if_nonfinite,
         )
         return grad_norm
+
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):
     @override

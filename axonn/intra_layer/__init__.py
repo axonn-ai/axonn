@@ -201,7 +201,7 @@ def no_grad_sync():
 
 @torch.no_grad()
 def sync_gradients_depth_parallel(
-    model, gradient_attr_name="grad", mean=False, vectorize=False 
+    model, gradient_attr_name="grad", mean=False, vectorize=False
 ):
     if NO_GRADIENT_SYNC:
         return
@@ -265,9 +265,7 @@ def sync_gradients_data_parallel(
         from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
         global_grad = _flatten_dense_tensors(grads_to_sync)
-        dist.all_reduce(
-            global_grad, group=ax.comm_handle.data_parallel_group
-        )
+        dist.all_reduce(global_grad, group=ax.comm_handle.data_parallel_group)
         if mean:
             global_grad.div_(world_size)
 
