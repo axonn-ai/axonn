@@ -169,7 +169,7 @@ class Linear(torch.nn.Module):
         bias=True,
         skip_bias_add=False,
         init_method=None,
-        use_easy_api=True,
+        expert_mode=False,
         **kwargs
     ):
         super(Linear, self).__init__()
@@ -183,7 +183,7 @@ class Linear(torch.nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
-        self.use_easy_api = use_easy_api
+        self.expert_mode = expert_mode
 
         if init_method is None:
             init_method = default_init_method
@@ -266,7 +266,7 @@ class Linear(torch.nn.Module):
 
         weight = self.weight
         if not self.transpose:
-            if self.use_easy_api:
+            if not self.expert_mode:
                 x = Drop.apply(x, self.inner_group)
             x = AsyncLinear.apply(
                 x,
@@ -279,10 +279,10 @@ class Linear(torch.nn.Module):
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
-            if self.use_easy_api:
+            if not self.expert_mode:
                 x = Gather.apply(x, self.outer_group)
         else:
-            if self.use_easy_api:
+            if not self.expert_mode:
                 x = Drop.apply(x, self.outer_group)
 
             x = AsyncLinear.apply(
@@ -296,14 +296,14 @@ class Linear(torch.nn.Module):
                 axonn.intra_layer.OVERLAP_ALL_REDUCE,
                 False,
             )
-            if self.use_easy_api:
+            if not self.expert_mode:
                 x = Gather.apply(x, self.inner_group)
 
         if self.bias is None:
             return x
         else:
             bias = self.bias
-            if self.use_easy_api:
+            if not self.expert_mode:
                 bias = Gather.apply(
                     bias,
                     self.outer_group if not self.transpose else self.inner_group,
