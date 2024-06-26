@@ -42,6 +42,7 @@ def norm_allclose(X, Y):
 )
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
 @pytest.mark.skip(reason="torch.all_close does not work with conv")
 def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     # These tests are in fp-32
@@ -54,15 +55,21 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     # This is required because TF32 cores only look at the first 10 bits of mantissa
     torch.backends.cudnn.allow_tf32 = False
 
+    if device == "cpu" and G_intra_d > 1:
+        return  # Gloo doesnt support reduce scatter
+
     ax.init(
         G_data=1,
         G_inter=1,
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
         G_intra_d=G_intra_d,
+        mixed_precision=False,
+        fp16_allreduce=False,
+        device=device,
     )
 
-    X = torch.randn(B, C, H, W).cuda() * 0.01
+    X = torch.randn(B, C, H, W).to(device) * 0.01
 
     inner_group = ax.comm_handle.inner_intra_layer_parallel_group
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
@@ -78,7 +85,9 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     else:
         X_local = X
 
-    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).cuda()
+    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).to(
+        device
+    )
 
     with torch.no_grad():
         # parallel FW pass
@@ -95,7 +104,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
             out_channels=C * 2,
             kernel_size=5,
             bias=bias,
-        ).cuda()
+        ).to(device)
         weight_sequential = _gather(
             _gather(
                 _gather(layer.weight, 0, depth_group).reshape(
@@ -126,12 +135,25 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
 )
 @pytest.mark.parametrize("easy_tp", [True, False])
 @pytest.mark.parametrize("bias", [True, False])
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
 @pytest.mark.parametrize("comm_opt_level", [0, 3])
 @pytest.mark.skip(reason="torch.all_close does not work with conv")
 def test_bw_pass(
-    G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias, comm_opt_level
+    G_intra_r,
+    G_intra_c,
+    G_intra_d,
+    B,
+    H,
+    W,
+    C,
+    easy_tp,
+    bias,
+    comm_opt_level,
+    device,
 ):
     # These tests are in fp-32
+    if device == "cpu" and G_intra_d > 1:
+        return  # Gloo doesn't support reduce scatter
     # Need to remove all non-determinism from convolutions
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
@@ -147,16 +169,21 @@ def test_bw_pass(
         G_intra_r=G_intra_r,
         G_intra_c=G_intra_c,
         G_intra_d=G_intra_d,
+        mixed_precision=False,
+        fp16_allreduce=False,
+        device=device,
     )
-    X = torch.randn(B, C, H, W).cuda() * 0.01
-    Y_grad = torch.randn(B, 2 * C, H - 4, W - 4).cuda() * 0.01
+    X = torch.randn(B, C, H, W).to(device) * 0.01
+    Y_grad = torch.randn(B, 2 * C, H - 4, W - 4).to(device) * 0.01
 
     inner_group = ax.comm_handle.inner_intra_layer_parallel_group
     outer_group = ax.comm_handle.outer_intra_layer_parallel_group
     depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
     # parallel backward pass
-    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).cuda()
+    layer = Conv2d(in_channels=C, out_channels=2 * C, kernel_size=5, bias=bias).to(
+        device
+    )
 
     if not easy_tp:
         X_local = (
@@ -176,9 +203,9 @@ def test_bw_pass(
         Y_local_grad = Y_grad
 
     with optimize_communication(
-        overlap_reduce_scatter=comm_opt_level >= 1,
+        overlap_reduce_scatter=comm_opt_level >= 1 and device != "cpu",
         cache_weights=comm_opt_level >= 2,
-        overlap_all_gather=comm_opt_level == 3,
+        overlap_all_gather=comm_opt_level == 3 and device != "cpu",
         model_object_for_overlapping_allgathers=layer,
     ):
         Y_local = layer(X_local, scatter_input=easy_tp, gather_output=easy_tp)
@@ -195,7 +222,7 @@ def test_bw_pass(
         out_channels=C * 2,
         kernel_size=5,
         bias=bias,
-    ).cuda()
+    ).to(device)
     with torch.no_grad():
         weight_sequential = _gather(
             _gather(
