@@ -46,7 +46,6 @@ from axonn.intra_layer import (
 
 
 class AxonnStrategy(ParallelStrategy):
-
     def __init__(
         self,
         accelerator: Optional[Accelerator] = None,

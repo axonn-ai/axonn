@@ -16,9 +16,9 @@ from axonn.intra_layer import (
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
 )
-@pytest.mark.parametrize("easy_tp", [False, True])
+@pytest.mark.parametrize("expert_mode", [False, True])
 @pytest.mark.parametrize("bias", [False, True])
-def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
+def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
     ax.init(
@@ -37,7 +37,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
 
     X_local = _drop(X, 0, depth_group)  # divide rows of X along the depth tensor group
 
-    if not easy_tp:
+    if expert_mode:
         # manually divide input
         X_local = _drop(
             X, 1, inner_group
@@ -45,7 +45,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
         # manually divide input
 
     layer = Linear(
-        in_features=H, out_features=H, bias=bias, use_easy_api=easy_tp
+        in_features=H, out_features=H, bias=bias, expert_mode=expert_mode
     ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
@@ -58,7 +58,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
         # parallel FW pass
         Y_local = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 0, depth_group)
-        if not easy_tp:  # gather output manually
+        if expert_mode:  # gather output manually
             Y_parallel = _gather(Y_local.clone(), 1, outer_group)
         Y_sequential = layer_sequential(X)
 
@@ -71,7 +71,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, easy_tp, bias):
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
 )
 @pytest.mark.parametrize("comm_opt_level", [0, 4])
-@pytest.mark.parametrize("easy_tp", [False, True])
+@pytest.mark.parametrize("expert_mode", [False, True])
 @pytest.mark.parametrize("clip_grad_norm", [-1, 1e-3])
 @pytest.mark.parametrize("bias", [False, True])
 def test_bw_pass(
@@ -81,7 +81,7 @@ def test_bw_pass(
     B,
     H,
     comm_opt_level,
-    easy_tp,
+    expert_mode,
     clip_grad_norm,
     bias,
 ):
@@ -103,7 +103,7 @@ def test_bw_pass(
 
     # parallel backward pass
     layer = Linear(
-        in_features=H, out_features=H, bias=bias, use_easy_api=easy_tp
+        in_features=H, out_features=H, bias=bias, expert_mode=expert_mode
     ).cuda()
     layer_sequential = torch.nn.Linear(in_features=H, out_features=H, bias=bias).cuda()
 
@@ -115,7 +115,7 @@ def test_bw_pass(
     X_local = (
         _drop(X, 0, depth_group).detach().clone()
     )  # divide colunns of X along the inner tensor group
-    if not easy_tp:
+    if expert_mode:
         X_local = (
             _drop(X_local, 1, inner_group).detach().clone()
         )  # divide colunns of X along the inner tensor group
@@ -123,7 +123,7 @@ def test_bw_pass(
     X_local.requires_grad = True
 
     Y_local_grad = _drop(Y_grad, 0, depth_group).detach().clone()
-    if not easy_tp:
+    if expert_mode:
         Y_local_grad = _drop(Y_local_grad, 1, outer_group).detach().clone()
 
     with optimize_communication(
@@ -151,7 +151,7 @@ def test_bw_pass(
         )
 
     X_grad_parallel = _gather(X_local.grad, 0, depth_group)
-    if not easy_tp:
+    if expert_mode:
         X_grad_parallel = _gather(X_grad_parallel, 1, inner_group)
 
     assert torch.allclose(
@@ -185,7 +185,7 @@ if __name__ == "__main__":
         B=2,
         H=256,
         comm_opt_level=0,
-        easy_tp=False,
+        expert_mode=False,
         clip_grad_norm=-1,
         bias=True,
     )
