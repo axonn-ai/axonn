@@ -42,8 +42,8 @@ from axonn.intra_layer import (
     sync_gradients_depth_parallel,
     clip_grad_norm_,
     no_grad_sync,
+    auto_parallelize
 )
-
 
 class AxonnStrategy(ParallelStrategy):
     def __init__(
@@ -212,6 +212,7 @@ class AxonnStrategy(ParallelStrategy):
         if self.G_data > 1:
             sync_gradients_data_parallel(module, mean=True)
 
+    @override
     def save_checkpoint(
         self,
         *args,
@@ -222,6 +223,7 @@ class AxonnStrategy(ParallelStrategy):
             "AxoNN strategy. Use axonn.save instead."
         )
 
+    @override
     def load_checkpoint(
         self,
         *args,
@@ -232,6 +234,7 @@ class AxonnStrategy(ParallelStrategy):
             " AxoNN strategy. Use axonn.load instead."
         )
 
+    @override
     def clip_gradients_norm(
         self,
         module: Module,
@@ -249,6 +252,14 @@ class AxonnStrategy(ParallelStrategy):
             error_if_nonfinite=error_if_nonfinite,
         )
         return grad_norm
+
+    @override
+    def module_init_context(self, empty_init: Optional[bool] = None):
+        return self.module_sharded_context()
+
+    @override
+    def module_sharded_context(self) -> ContextManager:
+        return auto_parallelize()
 
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):
