@@ -226,9 +226,10 @@ class AxonnStrategy(ParallelStrategy):
         ] = None,
         strict: bool = True,
     ) -> Dict[str, Any]:
+        # different prefix for different tensor parallel ranks
         checkpoint_prefix = get_prefix_for_checkpoint()
         directory, filename = os.path.split(path)
-        filename = checkpoint_prefix + "_" + filename
+        directory = os.path.join(directory, checkpoint_prefix)
         path = os.path.join(directory, filename)
         return super().load_checkpoint(path, state, strict)
 
@@ -244,7 +245,7 @@ class AxonnStrategy(ParallelStrategy):
             # different prefix for different tensor parallel ranks
             checkpoint_prefix = get_prefix_for_checkpoint()
             directory, filename = os.path.split(path)
-            filename = checkpoint_prefix + "_" + filename
+            directory = os.path.join(directory, checkpoint_prefix)
             state = self._convert_stateful_objects_in_state(
                 state, filter=(filter or {})
             )
