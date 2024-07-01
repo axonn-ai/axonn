@@ -42,8 +42,9 @@ from axonn.intra_layer import (
     sync_gradients_depth_parallel,
     clip_grad_norm_,
     no_grad_sync,
-    auto_parallelize
+    auto_parallelize,
 )
+
 
 class AxonnStrategy(ParallelStrategy):
     def __init__(
