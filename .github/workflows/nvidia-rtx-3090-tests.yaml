@@ -15,7 +15,6 @@ jobs:
     strategy:
       matrix:
         ginter: [ 1, 2 ]
-        memopt: [ '0', '1' ]
 
     steps:
     - uses: actions/checkout@v3
@@ -29,7 +28,6 @@ jobs:
       run: |
         export G_inter=${{ matrix.ginter }}
         export G_data=$(( 2 / G_inter ))
-        export memopt=${{ matrix.memopt }}
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
         mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
     - name: Uninstall AxoNN

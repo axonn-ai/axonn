@@ -296,5 +296,4 @@ class _AxoNNBackwardSyncControl(_BackwardSyncControl):
         """Blocks gradient synchronization inside AxoNN"""
         if not enabled:
             return nullcontext()
-
         return no_grad_sync()
