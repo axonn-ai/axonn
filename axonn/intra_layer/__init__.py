@@ -184,6 +184,7 @@ def optimize_communication(
     finally:
         clear_handles()
         accumulate()
+        clear_weights_cache()
         OVERLAP_ALL_REDUCE = False
         OVERLAP_REDUCE_SCATTER = False
         ALL_GATHER_ITERATOR = None
