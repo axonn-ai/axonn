@@ -196,6 +196,7 @@ def no_grad_sync():
     old_val = NO_GRADIENT_SYNC
     try:
         NO_GRADIENT_SYNC = True
+        yield None
     finally:
         NO_GRADIENT_SYNC = old_val
 
