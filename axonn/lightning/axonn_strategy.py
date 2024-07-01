@@ -44,10 +44,11 @@ from axonn.intra_layer import (
     clip_grad_norm_,
     no_grad_sync,
     auto_parallelize,
-    optimize_communication
+    optimize_communication,
 )
 from axonn.checkpoint import get_prefix_for_checkpoint
 import os
+
 
 class AxonnStrategy(ParallelStrategy):
     def __init__(
@@ -220,7 +221,9 @@ class AxonnStrategy(ParallelStrategy):
     def load_checkpoint(
         self,
         path: _PATH,
-        state: Optional[Union[Module, Optimizer, Dict[str, Union[Module, Optimizer, Any]]]] = None,
+        state: Optional[
+            Union[Module, Optimizer, Dict[str, Union[Module, Optimizer, Any]]]
+        ] = None,
         strict: bool = True,
     ) -> Dict[str, Any]:
         checkpoint_prefix = get_prefix_for_checkpoint()
@@ -238,13 +241,17 @@ class AxonnStrategy(ParallelStrategy):
         filter: Optional[Dict[str, Callable[[str, Any], bool]]] = None,
     ) -> None:
         if torch.distributed.get_rank(ax.comm_handle.data_parallel_group) == 0:
-            # different prefix for different tensor parallel ranks 
+            # different prefix for different tensor parallel ranks
             checkpoint_prefix = get_prefix_for_checkpoint()
             directory, filename = os.path.split(path)
             filename = checkpoint_prefix + "_" + filename
-            state = self._convert_stateful_objects_in_state(state, filter=(filter or {}))
+            state = self._convert_stateful_objects_in_state(
+                state, filter=(filter or {})
+            )
             path = os.path.join(directory, filename)
-            self.checkpoint_io.save_checkpoint(checkpoint=state, path=path, storage_options=storage_options)
+            self.checkpoint_io.save_checkpoint(
+                checkpoint=state, path=path, storage_options=storage_options
+            )
 
     @override
     def clip_gradients_norm(
@@ -273,11 +280,14 @@ class AxonnStrategy(ParallelStrategy):
     def module_sharded_context(self) -> ContextManager:
         return auto_parallelize()
 
-    def optimize_communication(self, module: Module, enabled: bool = True) -> ContextManager:
+    def optimize_communication(
+        self, module: Module, enabled: bool = True
+    ) -> ContextManager:
         if not enabled:
             return nullcontext()
         else:
             return optimize_communication(True, True, True, module)
+
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):
     @override
