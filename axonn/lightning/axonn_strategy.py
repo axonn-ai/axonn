@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Union, ContextManager
+from typing import Any, Dict, List, Optional, Union, ContextManager, Callable
 from contextlib import nullcontext
 
 import torch
@@ -35,6 +35,7 @@ from lightning.fabric.utilities.distributed import (
 )
 from lightning.fabric.utilities.distributed import group as _group
 from lightning.fabric.utilities.rank_zero import rank_zero_only
+from lightning.fabric.utilities.types import _PATH
 
 from axonn import axonn as ax
 from axonn.intra_layer import (
@@ -43,8 +44,10 @@ from axonn.intra_layer import (
     clip_grad_norm_,
     no_grad_sync,
     auto_parallelize,
+    optimize_communication
 )
-
+from axonn.checkpoint import get_prefix_for_checkpoint
+import os
 
 class AxonnStrategy(ParallelStrategy):
     def __init__(
@@ -214,26 +217,34 @@ class AxonnStrategy(ParallelStrategy):
             sync_gradients_data_parallel(module, mean=True)
 
     @override
-    def save_checkpoint(
-        self,
-        *args,
-        **kwargs,
-    ) -> None:
-        assert False, (
-            "Current fabric.save(..) is not supported with the "
-            "AxoNN strategy. Use axonn.save instead."
-        )
-
-    @override
     def load_checkpoint(
         self,
-        *args,
-        **kwargs,
+        path: _PATH,
+        state: Optional[Union[Module, Optimizer, Dict[str, Union[Module, Optimizer, Any]]]] = None,
+        strict: bool = True,
+    ) -> Dict[str, Any]:
+        checkpoint_prefix = get_prefix_for_checkpoint()
+        directory, filename = os.path.split(path)
+        filename = checkpoint_prefix + "_" + filename
+        path = os.path.join(directory, filename)
+        return super().load_checkpoint(path, state, strict)
+
+    @override
+    def save_checkpoint(
+        self,
+        path: _PATH,
+        state: Dict[str, Union[Module, Optimizer, Any]],
+        storage_options: Optional[Any] = None,
+        filter: Optional[Dict[str, Callable[[str, Any], bool]]] = None,
     ) -> None:
-        assert False, (
-            "Current fabric.load(..) is not supported with the"
-            " AxoNN strategy. Use axonn.load instead."
-        )
+        if torch.distributed.get_rank(ax.comm_handle.data_parallel_group) == 0:
+            # different prefix for different tensor parallel ranks 
+            checkpoint_prefix = get_prefix_for_checkpoint()
+            directory, filename = os.path.split(path)
+            filename = checkpoint_prefix + "_" + filename
+            state = self._convert_stateful_objects_in_state(state, filter=(filter or {}))
+            path = os.path.join(directory, filename)
+            self.checkpoint_io.save_checkpoint(checkpoint=state, path=path, storage_options=storage_options)
 
     @override
     def clip_gradients_norm(
@@ -262,6 +273,11 @@ class AxonnStrategy(ParallelStrategy):
     def module_sharded_context(self) -> ContextManager:
         return auto_parallelize()
 
+    def optimize_communication(self, module: Module, enabled: bool = True) -> ContextManager:
+        if not enabled:
+            return nullcontext()
+        else:
+            return optimize_communication(True, True, True, module)
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):
     @override
