@@ -49,6 +49,9 @@ jobs:
     - name: Run intra-layer Conv unit tests 
       run: |
         mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_conv.py 
+    - name: Run intra-layer Embedding unit tests
+        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_emb.py -k bw_pass
+        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_emb.py -k fw_pass
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
