@@ -16,7 +16,6 @@ from axonn.intra_layer import (
 )
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
@@ -26,6 +25,8 @@ from axonn.intra_layer import (
 def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     ax.init(
         G_data=1,
         G_inter=1,
@@ -70,7 +71,6 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     assert torch.allclose(Y_sequential, Y_parallel), "FW Pass - output does not match"
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
@@ -92,6 +92,8 @@ def test_bw_pass(
 ):
     # These tests are in fp-32
     torch.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     ax.init(
         G_data=1,
         G_inter=1,

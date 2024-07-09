@@ -45,14 +45,14 @@ jobs:
         pip install -e .
     - name: Run intra-layer FC unit tests 
       run: |
-        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_fc.py 
+        torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_fc.py 
     - name: Run intra-layer Conv unit tests 
       run: |
-        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_conv.py 
+        torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_conv.py 
     - name: Run intra-layer Embedding unit tests
       run: |
-        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_emb.py -k bw_pass
-        mpirun -mca orte_allowed_exit_without_sync 1 -n 2 pytest --with-mpi ./axonn/tests/test_intra_layer_emb.py -k fw_pass
+        torchrun --nproc_per_node 2 --no_python python -m pytest ./axonn/tests/test_intra_layer_emb.py -k bw_pass
+        torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_emb.py -k fw_pass
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn

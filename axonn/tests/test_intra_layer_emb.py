@@ -14,7 +14,6 @@ from axonn.intra_layer import (
 )
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("B", [2, 4, 8])
 @pytest.mark.parametrize("S", [1024, 2048])
 @pytest.mark.parametrize("H", [1024, 2048])
@@ -23,6 +22,8 @@ from axonn.intra_layer import (
 @pytest.mark.parametrize("expert_mode", [True, False])
 def test_fw_pass(G_intra_r, G_intra_d, B, S, H, V, expert_mode):
     # These tests are in fp-32
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     torch.manual_seed(42)
     ax.init(
         G_data=1,
@@ -71,6 +72,8 @@ def test_fw_pass(G_intra_r, G_intra_d, B, S, H, V, expert_mode):
 def test_bw_pass(G_intra_r, G_intra_d, B, S, H, V, expert_mode, clip_grad_norm):
     # These tests are in fp-32
     torch.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     ax.init(
         G_data=1,
         G_inter=1,
