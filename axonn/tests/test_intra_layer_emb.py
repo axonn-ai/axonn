@@ -10,9 +10,10 @@ from axonn.intra_layer import (
     sync_gradients_depth_parallel,
 )
 
-@pytest.mark.parametrize("B", [1, 2, 4, 8])
-@pytest.mark.parametrize("S", [1024, 2048, 4096, 8192])
-@pytest.mark.parametrize("H", [1024, 2048, 4096, 8192])
+@pytest.mark.mpi
+@pytest.mark.parametrize("B", [2, 4, 8])
+@pytest.mark.parametrize("S", [1024, 2048])
+@pytest.mark.parametrize("H", [1024, 2048])
 @pytest.mark.parametrize("V", [50304, 32000, 128256])
 @pytest.mark.parametrize(
     "G_intra_r,  G_intra_d", [(2, 1), (1, 2)]

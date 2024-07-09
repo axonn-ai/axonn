@@ -40,7 +40,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     if expert_mode:
         # manually divide input
         X_local = _drop(
-            X, 1, inner_group
+            X_local, 1, inner_group
         )  # divide colunns of X along the inner tensor group
         # manually divide input
 
@@ -59,7 +59,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
         Y_local = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 0, depth_group)
         if expert_mode:  # gather output manually
-            Y_parallel = _gather(Y_local.clone(), 1, outer_group)
+            Y_parallel = _gather(Y_parallel.clone(), 1, outer_group)
         Y_sequential = layer_sequential(X)
 
     assert torch.allclose(Y_sequential, Y_parallel), "FW Pass - output does not match"
