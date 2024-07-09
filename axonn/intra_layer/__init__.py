@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from .fully_connected import Linear  # noqa: F401
 from .conv import Conv2d  # noqa: F401
+from .embedding import Embedding
 
 from .communication import Drop, Gather
 from .gradient_normalization import clip_grad_norm_  # noqa: F401
