@@ -1,13 +1,8 @@
 import torch.distributed as dist
 import torch
-from torch.autograd import Function
-from torch.cuda.amp import custom_fwd, custom_bwd
-import math
-from functools import partial
 import torch.nn.functional as F
 
 from axonn import axonn as ax
-import axonn
 from .communication import (
     Drop,
     Gather,
@@ -52,37 +47,39 @@ def initialize_params(
 @torch.no_grad()
 def default_init_method(weight, padding_idx=None):
     return torch.nn.init.normal_(weight)
-    
+
+
 class Embedding(torch.nn.Module):
     def __init__(
         self,
-        num_embeddings, 
+        num_embeddings,
         embedding_dim,
-        padding_idx = None,
-        max_norm = None,
-        norm_type = 2.,
-        scale_grad_by_freq = False,
-        sparse = False,
-        _weight = None,
-        _freeze = False,
-        device=None,
-        dtype=None,
+        padding_idx=None,
+        max_norm=None,
+        norm_type=2.0,
+        scale_grad_by_freq=False,
+        sparse=False,
+        _weight=None,
+        _freeze=False,
+        *args,
         transpose=False,
-        bias=True,
-        skip_bias_add=False,
         init_method=None,
         expert_mode=False,
+        **kwargs,
     ):
         assert not _weight, "_weight argument is not supported."
-        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx < self.num_embeddings
+                ), "Padding_idx must be within num_embeddings"
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                assert (
+                    padding_idx >= -self.num_embeddings
+                ), "Padding_idx must be within num_embeddings"
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         self.max_norm = max_norm
@@ -107,7 +104,7 @@ class Embedding(torch.nn.Module):
         if not transpose:
             assert self.inner_group_size == 1
             assert self.embedding_dim % self.outer_group_size == 0
-            self.local_in_features = self.num_embeddings 
+            self.local_in_features = self.num_embeddings
             self.local_out_features = divide(self.embedding_dim, self.outer_group_size)
             initial_params = initialize_params(
                 self.out_features,
@@ -120,7 +117,7 @@ class Embedding(torch.nn.Module):
         else:
             assert self.outer_group_size == 1
             assert embedding_dim % self.inner_group_size == 0
-            self.local_in_features = self.num_embeddings 
+            self.local_in_features = self.num_embeddings
             self.local_out_features = divide(self.embedding_dim, self.inner_group_size)
             initial_params = initialize_params(
                 self.out_features,
@@ -133,7 +130,7 @@ class Embedding(torch.nn.Module):
 
         if self.padding_idx is not None:
             initial_params[padding_idx].fill_(0)
-        
+
         self.weight = torch.nn.Parameter(initial_params, requires_grad=not _freeze)
 
         setattr(self.weight, "is_tensor_parallel", True)
@@ -152,18 +149,26 @@ class Embedding(torch.nn.Module):
     def get_output_feature_size(self):
         return self.local_out_features
 
-    def forward(
-        self,
-        x
-    ):
+    def forward(self, x):
         # gather weights from depth parallel group
         # reduce scatter in the backward pass
         weight = self.weight
-        weight = ForwardGather_BackwardReduceScatter.apply(weight, self.depth_group).reshape(self.local_in_features, self.local_out_features)
-        x = F.embedding(x, weight, self.padding_idx, self.max_norm,
-                self.norm_type, self.scale_grad_by_freq, self.sparse)
+        weight = ForwardGather_BackwardReduceScatter.apply(
+            weight, self.depth_group
+        ).reshape(self.local_in_features, self.local_out_features)
+        x = F.embedding(
+            x,
+            weight,
+            self.padding_idx,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.sparse,
+        )
         if not self.expert_mode:
-            x = Gather.apply(x, self.outer_group if not self.transpose else self.inner_group)
+            x = Gather.apply(
+                x, self.outer_group if not self.transpose else self.inner_group
+            )
 
         return x
 
