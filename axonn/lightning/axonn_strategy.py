@@ -282,7 +282,7 @@ class AxonnStrategy(ParallelStrategy):
         return auto_parallelize()
 
     def optimize_communication(
-        self, module: Module, enabled: bool = True
+        self, module: Module, enabled: bool = True, *args, **kwargs
     ) -> ContextManager:
         if not enabled:
             return nullcontext()
