@@ -45,9 +45,12 @@ from axonn.intra_layer import (
     no_grad_sync,
     auto_parallelize,
     optimize_communication,
+    overlap_all_gathers_for_checkpointed_forward,
 )
+
 from axonn.checkpoint import get_prefix_for_checkpoint
 import os
+import types
 
 
 class AxonnStrategy(ParallelStrategy):
@@ -63,7 +66,7 @@ class AxonnStrategy(ParallelStrategy):
         G_intra_r: int = 1,
         G_intra_c: int = 1,
         G_intra_d: int = 1,
-        **kwargs: Any,
+        overlap_communication=False,
     ) -> None:
         super().__init__(
             accelerator=accelerator,
@@ -79,8 +82,8 @@ class AxonnStrategy(ParallelStrategy):
         self.G_intra_r = G_intra_r
         self.G_intra_c = G_intra_c
         self.G_intra_d = G_intra_d
-        self._axonn_kwargs = kwargs
         self._backward_sync_control = _AxoNNBackwardSyncControl()
+        self.overlap_communication = overlap_communication
 
     @property
     @override
@@ -127,7 +130,18 @@ class AxonnStrategy(ParallelStrategy):
 
     @override
     def setup_module(self, module: Module):
-        return module  # use autoparallelize later
+        if self.overlap_communication:
+            module.old_forward = module.forward
+
+            def get_new_forward_with_overlap():
+                def forward(self_, *args, **kwargs):
+                    with optimize_communication(True, True, True, self_):
+                        return self_.old_forward(*args, **kwargs)
+
+                return forward
+
+            module.forward = types.MethodType(get_new_forward_with_overlap(), module)
+        return module
 
     @override
     def module_to_device(self, module: Module) -> None:
@@ -205,14 +219,20 @@ class AxonnStrategy(ParallelStrategy):
 
     @override
     def backward(
-        self, tensor: Tensor, module: Optional[Module] = None, *args: Any, **kwargs: Any
+        self, tensor: Tensor, module: Module, *args: Any, **kwargs: Any
     ) -> None:
-        super().backward(tensor, module, *args, **kwargs)
+        assert module is not None, (
+            "When using AxoNN,"
+            " you need to pass the model in fabric.backward(model=..)"
+        )
+        if self.overlap_communication:
+            with optimize_communication(True, True, True, module):
+                modules_in_reverse = torch.nn.ModuleList(list(module.modules())[::-1])
+                with overlap_all_gathers_for_checkpointed_forward(modules_in_reverse):
+                    super().backward(tensor, module, *args, **kwargs)
+        else:
+            super().backward(tensor, module, *args, **kwargs)
         if self.G_intra_d > 1:
-            assert module is not None, (
-                "When using G_intra_d > 1 with AxoNN,"
-                " you need to pass the model in fabric.backward(model=..)"
-            )
             sync_gradients_depth_parallel(module, mean=True)
         if self.G_data > 1:
             sync_gradients_data_parallel(module, mean=True)
@@ -280,14 +300,6 @@ class AxonnStrategy(ParallelStrategy):
     @override
     def module_sharded_context(self) -> ContextManager:
         return auto_parallelize()
-
-    def optimize_communication(
-        self, module: Module, enabled: bool = True, *args, **kwargs
-    ) -> ContextManager:
-        if not enabled:
-            return nullcontext()
-        else:
-            return optimize_communication(True, True, True, module)
 
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):

@@ -10,6 +10,6 @@ if __name__ == "__main__":
     B = 4
     S = 2048
     layer = Embedding(V, H, expert_mode=True).cuda().half()
-    x = torch.randint(low=0, high=V, size=[B, S], device='cuda')
+    x = torch.randint(low=0, high=V, size=[B, S], device="cuda")
     y = layer(x)
     print(y.shape)

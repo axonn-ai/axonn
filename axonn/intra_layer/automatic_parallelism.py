@@ -24,6 +24,7 @@ def is_parallelizable_embedding(num_embeddings, embedding_dim):
     depth_condition = (num_embeddings * embedding_dim // (G_row * G_col)) % G_depth == 0
     return row_col_condition and depth_condition
 
+
 class patched_linear:
     def __new__(cls, in_features, out_features, bias=True, device=None, dtype=None):
         if is_parallelizable_linear(in_features, out_features):
@@ -45,7 +46,9 @@ class patched_linear:
 
 
 class patched_embedding:
-    def __new__(cls, num_embeddings, embedding_dim, *args, device=None, dtype=None, **kwargs):
+    def __new__(
+        cls, num_embeddings, embedding_dim, *args, device=None, dtype=None, **kwargs
+    ):
         if is_parallelizable_embedding(num_embeddings, embedding_dim):
             parallel_layer = Embedding(num_embeddings, embedding_dim, *args, **kwargs)
             if device is not None:
@@ -54,13 +57,14 @@ class patched_embedding:
                 parallel_layer = parallel_layer.to(dtype)
             return parallel_layer
         else:
-            sequential_layer = reference_to_original_embedding_class(num_embeddings, embedding_dim, *args, **kwargs)
+            sequential_layer = reference_to_original_embedding_class(
+                num_embeddings, embedding_dim, *args, **kwargs
+            )
             if device is not None:
                 sequential_layer = sequential_layer.to(device)
             if dtype is not None:
                 sequential_layer = sequential_layer.to(dtype)
             return sequential_layer
-
 
 
 @contextmanager
