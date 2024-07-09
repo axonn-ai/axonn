@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-
+from mpi4py import MPI  # noqa: F401
 import torchvision
 from external.models.vit import DistributedViT
 from torchvision.transforms import ToTensor

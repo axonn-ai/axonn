@@ -24,8 +24,8 @@ comm_handle = None
 
 
 def init(
-    G_inter: int,
-    G_data: int,
+    G_inter: int = 1,
+    G_data: int = 1,
     G_intra_r: int = 1,
     G_intra_c: int = 1,
     G_intra_d: int = 1,

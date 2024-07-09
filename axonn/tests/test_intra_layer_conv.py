@@ -1,3 +1,8 @@
+# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch
 import pytest
 from mpi4py import MPI  # noqa: F401
@@ -34,7 +39,6 @@ def norm_allclose(X, Y):
         return False
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("H, W, C", [(64, 64, 4), (64, 64, 8), (64, 32, 8)])
 @pytest.mark.parametrize("B", [2, 4, 16])
 @pytest.mark.parametrize(
@@ -47,6 +51,8 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, W, C, easy_tp, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        dist.init_process_group(backend="nccl")
     # Need to remove all non-determinism from convolutions
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
@@ -135,6 +141,8 @@ def test_bw_pass(
     # Need to remove all non-determinism from convolutions
     torch.manual_seed(42)
     torch.cuda.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        dist.init_process_group(backend="nccl")
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True

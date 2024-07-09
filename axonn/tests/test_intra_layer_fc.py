@@ -1,3 +1,8 @@
+# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch
 import pytest
 from axonn import axonn as ax
@@ -11,7 +16,6 @@ from axonn.intra_layer import (
 )
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
@@ -21,6 +25,8 @@ from axonn.intra_layer import (
 def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     # These tests are in fp-32
     torch.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     ax.init(
         G_data=1,
         G_inter=1,
@@ -40,7 +46,7 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
     if expert_mode:
         # manually divide input
         X_local = _drop(
-            X, 1, inner_group
+            X_local, 1, inner_group
         )  # divide colunns of X along the inner tensor group
         # manually divide input
 
@@ -59,13 +65,12 @@ def test_fw_pass(G_intra_r, G_intra_c, G_intra_d, B, H, expert_mode, bias):
         Y_local = layer(X_local)
         Y_parallel = _gather(Y_local.clone(), 0, depth_group)
         if expert_mode:  # gather output manually
-            Y_parallel = _gather(Y_local.clone(), 1, outer_group)
+            Y_parallel = _gather(Y_parallel.clone(), 1, outer_group)
         Y_sequential = layer_sequential(X)
 
     assert torch.allclose(Y_sequential, Y_parallel), "FW Pass - output does not match"
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize("B, H", [(32, 64), (16, 128), (2, 256)])
 @pytest.mark.parametrize(
     "G_intra_r, G_intra_c, G_intra_d", [(2, 1, 1), (1, 2, 1), (1, 1, 2)]
@@ -87,6 +92,8 @@ def test_bw_pass(
 ):
     # These tests are in fp-32
     torch.manual_seed(42)
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
     ax.init(
         G_data=1,
         G_inter=1,
