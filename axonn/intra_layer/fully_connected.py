@@ -52,6 +52,14 @@ def initialize_params(
 def default_init_method(weight):
     return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
 
+def get_mnk(input_, weight):
+    import numpy as np
+    input_shape = list(input_.shape)
+    m = np.prod(input_shape[:-1])
+    k = input_shape[-1]
+    n = weight.shape[0]
+
+    return f"{m},{n},{k}"
 
 class AsyncLinear(Function):
     @staticmethod
@@ -77,11 +85,12 @@ class AsyncLinear(Function):
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.backward_comm_async = backward_comm_async
+        mnk = get_mnk(input_, weight)
         if not forward_comm_async:
             from axonn.intra_layer import timers
-            timers.start("FW PASS")
+            timers.start(f"FW PASS - {mnk}")
             output = input_.matmul(weight.t())
-            timers.stop("FW PASS")
+            timers.stop(f"FW PASS - {mnk}")
             
             dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
         else:
@@ -107,6 +116,7 @@ class AsyncLinear(Function):
         input_, weight, original_weight = ctx.saved_tensors
         handle = None
         overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
+        mnk = get_mnk(input_, weight)
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (
             not overlap_reduce_scatter
         ):
@@ -114,10 +124,10 @@ class AsyncLinear(Function):
             if ctx.needs_input_grad[0]:
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
-                    timers.start("BW PASS - ACT")
+                    timers.start(f"BW PASS - ACT - {mnk}")
                 grad_input = grad_output.matmul(weight)
                 if ENABLE_TIMERS:
-                    timers.stop("BW PASS - ACT")
+                    timers.stop(f"BW PASS - ACT - {mnk}")
                 handle = dist.all_reduce(
                     grad_input,
                     group=ctx.backward_all_reduce_group,
@@ -126,14 +136,14 @@ class AsyncLinear(Function):
             if ctx.needs_input_grad[1]:
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
-                    timers.start("BW PASS - W")
+                    timers.start(f"BW PASS - W - {mnk}")
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 )
                 if ENABLE_TIMERS:
-                    timers.stop("BW PASS - W")
+                    timers.stop(f"BW PASS - W - {mnk}")
 
             grad_weight = grad_weight.reshape(-1)
             grad_weight = _reduce_scatter(
@@ -154,14 +164,14 @@ class AsyncLinear(Function):
             if ctx.needs_input_grad[1]:
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
-                    timers.start("BW PASS - W")
+                    timers.start(f"BW PASS - W - {mnk}")
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
                 if ENABLE_TIMERS:
-                    timers.stop("BW PASS - W")
+                    timers.stop(f"BW PASS - W - {mnk}")
                 grad_weight = _reduce_scatter(
                     grad_weight,
                     dim=0,
@@ -174,10 +184,10 @@ class AsyncLinear(Function):
             if ctx.needs_input_grad[0]:
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
-                    timers.start("BW PASS - ACT")
+                    timers.start(f"BW PASS - ACT - {mnk}")
                 grad_input = grad_output.matmul(weight)
                 if ENABLE_TIMERS:
-                    timers.stop("BW PASS - ACT")
+                    timers.stop(f"BW PASS - ACT - {mnk}")
             return grad_input, grad_weight, None, None, None, None, None, None, None
 
 
@@ -287,6 +297,8 @@ class Linear(torch.nn.Module):
         # reduce scatter in the backward pass
 
         weight = self.weight
+        x_nd_shape = list(x.shape)
+        x = x.reshape(-1, x.shape[-1])
         if not self.transpose:
             if scatter_input:
                 x = Drop.apply(x, self.inner_group)
@@ -325,6 +337,7 @@ class Linear(torch.nn.Module):
                 x = Gather.apply(x, self.inner_group)
                 #x = Gather.apply(x, self.depth_group, 0)
 
+        x = x.reshape(*x_nd_shape[:-1], -1)
         if self.bias is None:
             return x
         else:
