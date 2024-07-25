@@ -89,7 +89,7 @@ class AsyncLinear(Function):
         if not forward_comm_async:
             from axonn.intra_layer import timers
             timers.start(f"FW PASS - {mnk}")
-            if False:
+            if True:
                 output = input_.matmul(weight.t())
             else:
                 output = weight.matmul(input_.t().contiguous())
