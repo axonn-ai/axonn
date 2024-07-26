@@ -13,6 +13,9 @@ from .communication import (
     _reduce_scatter,
 )
 
+from .tuned_matmul import tuned_matmul
+
+TUNE=True
 
 def divide(a, b):
     assert a % b == 0
@@ -89,11 +92,12 @@ class AsyncLinear(Function):
         if not forward_comm_async:
             from axonn.intra_layer import timers
             timers.start(f"FW PASS - {mnk}")
-            if True:
+            if not TUNE:
                 output = input_.matmul(weight.t())
             else:
-                output = weight.matmul(input_.t().contiguous())
-                output = output.t().contiguous()
+                #output = weight.matmul(input_.t().contiguous())
+                #output = output.t().contiguous()
+                output = tuned_matmul(input_, weight.t(), signature=f"FW PASS - {mnk}")
             timers.stop(f"FW PASS - {mnk}")
             
             dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
@@ -129,7 +133,10 @@ class AsyncLinear(Function):
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
                     timers.start(f"BW PASS - ACT - {mnk}")
-                grad_input = grad_output.matmul(weight)
+                if not TUNE:
+                    grad_input = grad_output.matmul(weight)
+                else:
+                    grad_input = tuned_matmul(grad_output, weight, signature=f"BW PASS - ACT - {mnk}")
                 if ENABLE_TIMERS:
                     timers.stop(f"BW PASS - ACT - {mnk}")
                 handle = dist.all_reduce(
@@ -141,11 +148,15 @@ class AsyncLinear(Function):
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
                     timers.start(f"BW PASS - W - {mnk}")
+                #if not TUNE:
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 )
+                #else:
+                #    grad_weight = tuned_matmul(grad_output.reshape(-1, grad_output.shape[-1]).t(), 
+                #                               input_.view(-1, input_.shape[-1]), signature=f"BW PASS - W - {mnk}")
                 if ENABLE_TIMERS:
                     timers.stop(f"BW PASS - W - {mnk}")
 
@@ -169,11 +180,16 @@ class AsyncLinear(Function):
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
                     timers.start(f"BW PASS - W - {mnk}")
+                #if not TUNE:
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
+                #else:
+                #    grad_weight = tuned_matmul(grad_output.reshape(-1, grad_output.shape[-1]).t(),
+                #                               input_.view(-1, input_.shape[-1]), 
+                #                               signature=f"BW PASS - W - {mnk}").reshape(-1)
                 if ENABLE_TIMERS:
                     timers.stop(f"BW PASS - W - {mnk}")
                 grad_weight = _reduce_scatter(
@@ -189,7 +205,10 @@ class AsyncLinear(Function):
                 from axonn.intra_layer import timers, ENABLE_TIMERS
                 if ENABLE_TIMERS:
                     timers.start(f"BW PASS - ACT - {mnk}")
-                grad_input = grad_output.matmul(weight)
+                if not TUNE:
+                    grad_input = grad_output.matmul(weight)
+                else:
+                    grad_input = tuned_matmul(grad_output, weight, signature=f"BW PASS - ACT - {mnk}")
                 if ENABLE_TIMERS:
                     timers.stop(f"BW PASS - ACT - {mnk}")
             return grad_input, grad_weight, None, None, None, None, None, None, None
