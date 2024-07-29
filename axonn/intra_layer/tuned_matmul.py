@@ -10,6 +10,8 @@ def print_rank0(msg):
         print(f"Matmul tuner: {msg}")
 
 def time_sth(operation):
+    torch.cuda.synchronize()
+
     for _ in range(5):
         operation()
     st, en = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
