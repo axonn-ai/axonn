@@ -229,6 +229,20 @@ class communication_handle:
                     elif group_name == "d":
                         self.depth_intra_layer_parallel_group = group
 
+                # Combined inner + middle
+                for i in range(tp_sizes[2]):
+                    group_members = list(
+                        ranks_in_ith_jth_intra_layer_group[i, :, :].flatten()
+                    )
+                    group = torch.distributed.new_group(
+                        ranks=group_members, backend="nccl"
+                    )
+                    if self.world_rank in group_members:
+                        self.middle_inner_intra_layer_parallel_group = group
+                        self.middle_inner_intra_layer_parallel_group_root = (
+                            group_members[0]
+                        )
+
 
 
     def _torch_to_mpi(self, tensor: torch.Tensor):
