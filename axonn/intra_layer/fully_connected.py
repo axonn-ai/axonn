@@ -15,7 +15,7 @@ from .communication import (
 
 from .tuned_matmul import tuned_matmul
 
-TUNE=True
+TUNE=False
 
 def divide(a, b):
     assert a % b == 0
@@ -84,10 +84,12 @@ class AsyncLinear(Function):
             weight, dim=0, process_group=ax.comm_handle.depth_intra_layer_parallel_group_2, cache=cache_weights
         )
         weight = weight.reshape(local_weight_shape)
-        ctx.save_for_backward(input_, weight, original_weight)
+        ctx.save_for_backward(input_, original_weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.backward_comm_async = backward_comm_async
+        ctx.shape = local_weight_shape
+
         mnk = get_mnk(input_, weight)
         if not forward_comm_async:
             from axonn.intra_layer import timers
@@ -121,7 +123,11 @@ class AsyncLinear(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output):
-        input_, weight, original_weight = ctx.saved_tensors
+        input_, original_weight  = ctx.saved_tensors
+        weight = _gather(
+            original_weight, dim=0, process_group=ctx.depth_parallel_group, cache=False
+        )
+        weight = weight.reshape(ctx.shape)
         handle = None
         overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
         mnk = get_mnk(input_, weight)
