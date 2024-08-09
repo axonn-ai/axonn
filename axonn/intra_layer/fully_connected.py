@@ -15,7 +15,7 @@ from .communication import (
 
 from .tuned_matmul import tuned_matmul
 
-TUNE=False
+TUNE=True
 
 def divide(a, b):
     assert a % b == 0
