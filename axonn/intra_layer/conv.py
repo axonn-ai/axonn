@@ -90,7 +90,7 @@ class Conv2d(torch.nn.Module):
 
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
         setattr(self.weight, "is_tensor_parallel", True)
-        setattr(self.weight, "needs_gradient_sync", False)
+        setattr(self.weight, "needs_depth_parallel_gradient_sync", False)
         setattr(
             self.weight,
             "process_group_for_norm_reduction",
@@ -102,7 +102,7 @@ class Conv2d(torch.nn.Module):
                 torch.zeros(self.local_out_channels), requires_grad=True
             )
             setattr(self.bias, "is_tensor_parallel", True)
-            setattr(self.bias, "needs_gradient_sync", True)
+            setattr(self.bias, "needs_depth_parallel_gradient_sync", True)
             setattr(
                 self.bias,
                 "process_group_for_norm_reduction",

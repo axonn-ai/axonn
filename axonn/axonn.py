@@ -9,14 +9,6 @@ from typing import Optional
 from .communication import communication_handle
 import torch
 
-try:
-    import mpi4py
-
-    MPI4PY = True
-    mpi4py.rc.initialize = False  # do not initialize MPI automatically
-except ImportError:
-    MPI4PY = False
-
 # True when init has been called
 is_initialized = False
 # Communication handle for point-to-point (MPI) and collective (NCCL) communication

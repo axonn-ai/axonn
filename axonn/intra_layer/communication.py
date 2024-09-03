@@ -1,7 +1,7 @@
 import torch.distributed as dist
 import torch
 import axonn
-
+import axonn.intra_layer.overlap_communication as overlap_communication
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
     input_ = input_.contiguous()
@@ -10,7 +10,7 @@ def _all_reduce(input_, process_group=None, overlap_comm=False):
             input_.contiguous(), group=process_group, async_op=overlap_comm
         )
         if overlap_comm:
-            axonn.intra_layer.register_handle(handle)
+            overlap_communication.register_handle(handle)
     return input_
 
 
@@ -32,14 +32,14 @@ def _gather(input_, dim, process_group=None, cache=False):
     if dist.get_world_size(process_group) == 1:
         return input_
 
-    if input_ in axonn.intra_layer.weights_cache:
-        output, handle = axonn.intra_layer.retrieve_all_gathered_weight(
+    if input_ in overlap_communication.weights_cache:
+        output, handle = overlap_communication.retrieve_all_gathered_weight(
             input_, delete=not cache
         )
         if handle is not None:
             handle.wait()
             if cache:
-                axonn.intra_layer.weights_cache[input_][1] = None
+                overlap_communication.weights_cache[input_][1] = None
     else:
         input_ = input_.contiguous()
         # Size and dimension.
@@ -55,7 +55,7 @@ def _gather(input_, dim, process_group=None, cache=False):
         output = torch.cat(tensor_list, dim=dim).contiguous()
 
         if cache:
-            axonn.intra_layer.weights_cache[input_] = output, None
+            overlap_communication.weights_cache[input_] = output, None
 
     return output
 
@@ -84,8 +84,64 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         )
 
     if overlap_comm:
-        axonn.intra_layer.register_handle(handle)
+        overlap_communication.register_handle(handle)
     return output
+
+def _all_to_all(input_, process_group=None):
+    # if input is of shape [m,...,k], and process group size is G
+    # then this returns a tensor of [m/G, ..., kG]. 
+    input_ = input_.contiguous()
+    output = torch.empty_like(input_)
+    world_size = torch.distributed.get_world_size(process_group)
+    send_tensors = list(torch.chunk(input_, world_size))
+    recv_tensors = list(torch.chunk(output, world_size))
+    torch.distributed.all_to_all(recv_tensors, 
+                                 send_tensors, 
+                                 group=process_group)
+    return torch.cat(recv_tensors, dim=-1)
+
+def _all_to_all_transpose(input_, process_group=None):
+    # if input is of shape [mxk], and process group size is G
+    # then this returns a tensor of [mG x k/G]. 
+    input_ = torch.transpose(input_, 0, -1)
+    return torch.transpose(_all_to_all(input_, process_group), 0, -1)
+
+
+class AlltoAll(torch.autograd.Function):
+    # if input is of shape [mxk], and process group size is G
+    # then this returns a tensor of [m/G x kG]. 
+    @staticmethod
+    def symbolic(graph, input_, process_group=None):
+        ctx.process_group = process_group
+        return _all_to_all(input_, process_group)
+
+    @staticmethod
+    def forward(ctx, input_, process_group=None):
+        ctx.process_group = process_group
+        return _all_to_all(input_, process_group)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return _all_to_all_transpose(grad_output, ctx.process_group), None
+
+
+class AlltoAllTranspose(torch.autograd.Function):
+    # if input is of shape [mxk], and process group size is G
+    # then this returns a tensor of [mG x k/G]. 
+    @staticmethod
+    def symbolic(graph, input_, process_group=None):
+        ctx.process_group = process_group
+        return _all_to_all_transpose(input_, process_group)
+
+    @staticmethod
+    def forward(ctx, input_, process_group=None):
+        ctx.process_group = process_group
+        return _all_to_all_transpose(input_, process_group)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return _all_to_all(grad_output, ctx.process_group), None
+
 
 
 class ForwardAllReduce(torch.autograd.Function):
@@ -120,7 +176,7 @@ class BackwardAllReduce(torch.autograd.Function):
         if not ctx.overlap_comm:
             return grad_input, None, None
         else:
-            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
+            overlap_communication.accumulate_later(ctx.input, grad_input)
             return None, None, None
 
 
@@ -206,5 +262,5 @@ class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
         if not ctx.overlap_comm:
             return (grad_input, None, None, None, None)
         else:
-            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
+            overlap_communication.accumulate_later(ctx.input, grad_input)
             return None, None, None, None, None
