@@ -11,11 +11,9 @@ from .communication import (
     Gather,
     _gather,
     _reduce_scatter,
-    AlltoAll,
-    AlltoAllTranspose
 )
 import axonn.intra_layer.overlap_communication as overlap_communication
-
+from .asym_communication import Gatherv, Dropv, GatherBatchScatterChannels, GatherChannelsScatterBatch, gather_batch_sizes
 
 def divide(a, b):
     assert a % b == 0
@@ -164,6 +162,7 @@ class Linear(torch.nn.Module):
         **kwargs
     ):
         super(Linear, self).__init__()
+
         # weights are shaped [out_features, in_features]
         # in_features are distributed across self.inner_group (X tensor parallel group)
         # out_features are distributed across self.inner_group (Y tensor parallel group)
@@ -215,7 +214,7 @@ class Linear(torch.nn.Module):
             self.depth_group,
             init_method,
         )
-        # register the weight matrix as a parameter. This is necessary for PyTorch.
+        # register the weight matrix as a trainable parameter.
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
         # extra book-keeping for the weight tensor. 
@@ -261,13 +260,16 @@ class Linear(torch.nn.Module):
         x,
         cache_weights_in_all_gather=False,
     ):
-
+        original_shape_x = x.shape
+        x = x.reshape(-1, x.shape[-1])
         weight = self.weight
         if not self.expert_mode:
             # extra communication to transition from pure data parallelism
             # to 4D hybrid parallelism
-            x = AlltoAllTranspose.apply(x, self.inner_group)
-            x = Gather.apply(x, self.outer_group, 0)
+            inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
+            x = GatherBatchScatterChannels.apply(x, inner_group_batch_sizes, self.inner_group)
+            outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
+            x  = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
         x = AsyncLinear.apply(
             x,
             weight,
@@ -280,8 +282,10 @@ class Linear(torch.nn.Module):
         if not self.expert_mode:
             # extra communication to transition from 4D hybrid parallelism
             # to pure data parallelism
-            x = AlltoAll.apply(x, self.outer_group)
-            x = Drop.apply(x, self.inner_group, 0)
+            x = GatherChannelsScatterBatch.apply(x, outer_group_batch_sizes, self.outer_group)
+            x = Dropv.apply(x, inner_group_batch_sizes, self.inner_group)
+
+        x = x.reshape(*original_shape_x[:-1], x.shape[-1])
 
         if self.bias is None:
             return x

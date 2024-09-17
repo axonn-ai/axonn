@@ -87,61 +87,6 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         overlap_communication.register_handle(handle)
     return output
 
-def _all_to_all(input_, process_group=None):
-    # if input is of shape [m,...,k], and process group size is G
-    # then this returns a tensor of [m/G, ..., kG]. 
-    input_ = input_.contiguous()
-    output = torch.empty_like(input_)
-    world_size = torch.distributed.get_world_size(process_group)
-    send_tensors = list(torch.chunk(input_, world_size))
-    recv_tensors = list(torch.chunk(output, world_size))
-    torch.distributed.all_to_all(recv_tensors, 
-                                 send_tensors, 
-                                 group=process_group)
-    return torch.cat(recv_tensors, dim=-1)
-
-def _all_to_all_transpose(input_, process_group=None):
-    # if input is of shape [mxk], and process group size is G
-    # then this returns a tensor of [mG x k/G]. 
-    input_ = torch.transpose(input_, 0, -1)
-    return torch.transpose(_all_to_all(input_, process_group), 0, -1)
-
-
-class AlltoAll(torch.autograd.Function):
-    # if input is of shape [mxk], and process group size is G
-    # then this returns a tensor of [m/G x kG]. 
-    @staticmethod
-    def symbolic(graph, input_, process_group=None):
-        ctx.process_group = process_group
-        return _all_to_all(input_, process_group)
-
-    @staticmethod
-    def forward(ctx, input_, process_group=None):
-        ctx.process_group = process_group
-        return _all_to_all(input_, process_group)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return _all_to_all_transpose(grad_output, ctx.process_group), None
-
-
-class AlltoAllTranspose(torch.autograd.Function):
-    # if input is of shape [mxk], and process group size is G
-    # then this returns a tensor of [mG x k/G]. 
-    @staticmethod
-    def symbolic(graph, input_, process_group=None):
-        ctx.process_group = process_group
-        return _all_to_all_transpose(input_, process_group)
-
-    @staticmethod
-    def forward(ctx, input_, process_group=None):
-        ctx.process_group = process_group
-        return _all_to_all_transpose(input_, process_group)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return _all_to_all(grad_output, ctx.process_group), None
-
 
 
 class ForwardAllReduce(torch.autograd.Function):
