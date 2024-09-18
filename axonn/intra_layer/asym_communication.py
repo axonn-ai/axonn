@@ -13,7 +13,7 @@ def gather_batch_sizes(local_batch_size, process_group=None):
     global_batch_tensor = torch.empty((world_size), 
 					device='cuda', dtype=local_batch_tensor.dtype)
     dist.all_gather_into_tensor(global_batch_tensor, local_batch_tensor, group=process_group)
-    return global_batch_tensor
+    return global_batch_tensor.cpu()
 
 @torch.no_grad()
 def _allgatherv(tensor, rank_local_batch_sizes, process_group=None):
