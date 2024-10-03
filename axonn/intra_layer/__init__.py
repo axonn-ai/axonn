@@ -69,7 +69,7 @@ def sync_gradients(
             # so we only need the reduction over the data parallel group
             dist.all_reduce(grad, group=data_parallel_group)
             if mean:
-                grad.div_(G_data * G_intra_d)
+                grad.div_(torch.distributed.get_world_size())
 
         for grad in grads_to_sync["tensor_parallel_biases"]:
             # biases need to be reduced over both the data parallel
@@ -77,12 +77,11 @@ def sync_gradients(
             dist.all_reduce(grad, group=data_parallel_group)
             dist.all_reduce(grad, group=depth_parallel_group)
             if mean:
-                grad.div_(G_data * G_intra_d)
+                grad.div_(torch.distributed.get_world_size())
 
         for grad in grads_to_sync["others"]:
             # all other weights are purely data parallel
             dist.all_reduce(grad)
             if mean:
                 grad.div_(torch.distributed.get_world_size())
-
 
