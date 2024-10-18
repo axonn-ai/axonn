@@ -38,9 +38,7 @@ class Operation(Enum):
 
 
 class AxoNN_Inter_Layer_Engine:
-    def __init__(
-        self, model, loss_fn, computation_dtype=torch.float16, expert_mode=False
-    ):
+    def __init__(self, model, loss_fn, computation_dtype=torch.float16):
         assert (
             ax.is_initialized
         ), "Please call ax.init(....) before calling AxoNNPipelineEngine"
@@ -61,7 +59,6 @@ class AxoNN_Inter_Layer_Engine:
 
         self.computation_dtype = computation_dtype
         self.scaler = LossScaler()
-        self.expert_mode = expert_mode
 
     def _get_subtensor(self, tensor, microbatch_no):
         """divide the tensor into equal tensors of micro_batch_size and
@@ -426,7 +423,7 @@ class AxoNN_Inter_Layer_Engine:
             assert not eval_mode
             post_bw_hook(self.model)
 
-        sync_gradients(self.model, mean=True, expert_mode=self.expert_mode)
+        sync_gradients(self.model, mean=True, expert_mode=True)
         if self.computation_dtype == torch.float16:
             global_overflow = self._unscale_gradients()
             if not global_overflow:

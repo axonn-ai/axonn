@@ -5,8 +5,9 @@
 
 import torch.distributed as dist
 import torch
+
 from torch.autograd import Function
-from torch.amp import custom_fwd, custom_bwd
+
 import math
 
 from axonn import axonn as ax
@@ -24,6 +25,32 @@ from .asym_communication import (
     GatherChannelsScatterBatch,
     gather_batch_sizes,
 )
+
+
+# Wrapper for custom_fwd to handle different versions of PyTorch
+def version_aware_custom_fwd(*args, **kwargs):
+    version = torch.__version__.split(".")
+    major_version = int(version[0])
+    minor_version = int(version[1])
+    if major_version > 2 or (major_version == 2 and minor_version >= 4):
+        # For PyTorch version >= 2.4, pass device_type="cuda"
+        return torch.amp.custom_fwd(device_type="cuda")(*args, **kwargs)
+    else:
+        # For PyTorch version < 2.4, no arguments are required
+        return torch.cuda.amp.custom_fwd(*args, **kwargs)
+
+
+# Wrapper for custom_bwd to handle different versions of PyTorch
+def version_aware_custom_bwd(*args, **kwargs):
+    version = torch.__version__.split(".")
+    major_version = int(version[0])
+    minor_version = int(version[1])
+    if major_version > 2 or (major_version == 2 and minor_version >= 4):
+        # For PyTorch version >= 2.4, pass device_type="cuda"
+        return torch.amp.custom_bwd(device_type="cuda")(*args, **kwargs)
+    else:
+        # For PyTorch version < 2.4, no arguments are required
+        return torch.cuda.amp.custom_bwd(*args, **kwargs)
 
 
 def divide(a, b):
@@ -67,7 +94,7 @@ def default_init_method(weight):
 
 class AsyncLinear(Function):
     @staticmethod
-    @custom_fwd(device_type="cuda")
+    @version_aware_custom_fwd
     def forward(
         ctx,
         input_,
@@ -93,7 +120,7 @@ class AsyncLinear(Function):
         return output
 
     @staticmethod
-    @custom_bwd(device_type="cuda")
+    @version_aware_custom_bwd
     def backward(ctx, grad_output):
         input_, original_weight = ctx.saved_tensors
         weight = _gather(
