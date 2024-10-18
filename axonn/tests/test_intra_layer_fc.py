@@ -204,6 +204,7 @@ def test_bw_pass(
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()
 
+
 if __name__ == "__main__":
     test_bw_pass(
         G_intra_r=1,
