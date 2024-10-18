@@ -75,7 +75,6 @@ def test_vit_mnist():
 
     assert epoch_loss / len(train_loader) < 0.1, "model did not converge"
 
-    torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
