@@ -76,6 +76,5 @@ def test_vit_mnist():
     assert epoch_loss / len(train_loader) < 0.1, "model did not converge"
 
 
-
 if __name__ == "__main__":
     test_vit_mnist()
