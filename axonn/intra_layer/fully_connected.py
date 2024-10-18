@@ -1,11 +1,15 @@
+# Copyright 2023-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch.distributed as dist
 import torch
 from torch.autograd import Function
-from torch.cuda.amp import custom_fwd, custom_bwd
+from torch.amp import custom_fwd, custom_bwd
 import math
 
 from axonn import axonn as ax
-import axonn
 from .communication import (
     Drop,
     Gather,
@@ -13,7 +17,14 @@ from .communication import (
     _reduce_scatter,
 )
 import axonn.intra_layer.overlap_communication as overlap_communication
-from .asym_communication import Gatherv, Dropv, GatherBatchScatterChannels, GatherChannelsScatterBatch, gather_batch_sizes
+from .asym_communication import (
+    Gatherv,
+    Dropv,
+    GatherBatchScatterChannels,
+    GatherChannelsScatterBatch,
+    gather_batch_sizes,
+)
+
 
 def divide(a, b):
     assert a % b == 0
@@ -56,7 +67,7 @@ def default_init_method(weight):
 
 class AsyncLinear(Function):
     @staticmethod
-    @custom_fwd
+    @custom_fwd(device_type="cuda")
     def forward(
         ctx,
         input_,
@@ -82,7 +93,7 @@ class AsyncLinear(Function):
         return output
 
     @staticmethod
-    @custom_bwd
+    @custom_bwd(device_type="cuda")
     def backward(ctx, grad_output):
         input_, original_weight = ctx.saved_tensors
         weight = _gather(
@@ -175,7 +186,7 @@ class Linear(torch.nn.Module):
             self.inner_group = ax.comm_handle.outer_intra_layer_parallel_group
             self.outer_group = ax.comm_handle.inner_intra_layer_parallel_group
 
-        # depth_group is the Z tensor parallel group (akin to FSDP) 
+        # depth_group is the Z tensor parallel group (akin to FSDP)
         self.depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
         # calculating the sizes of each tensor parallel process group
@@ -186,10 +197,12 @@ class Linear(torch.nn.Module):
         # these are the in and out features of the full global weight matrix
         self.in_features = in_features
         self.out_features = out_features
-        
+
         # expert mode = True -> user needs to parallelize non-linear layers manually
-        # expert mode = False -> non-linear layers are parallelized using data parallelism 
-        #                        automatically by AxoNN. This does involve some extra communication
+        # expert mode = False -> non-linear layers are parallelized using
+        #                        data parallelism
+        #                        automatically by AxoNN. This does involve some
+        #                        extra communication
         #                        at the beginning and end of each linear layer.
         self.expert_mode = expert_mode
 
@@ -197,9 +210,9 @@ class Linear(torch.nn.Module):
         if init_method is None:
             init_method = default_init_method
 
-        #in_features should be divisible by inner_group_size
+        # in_features should be divisible by inner_group_size
         assert in_features % self.inner_group_size == 0
-        #in_features should be divisible by inner_group_size
+        # in_features should be divisible by inner_group_size
         assert out_features % self.outer_group_size == 0
         # local_in_features - this is the number of in_features on each GPU
         self.local_in_features = divide(in_features, self.inner_group_size)
@@ -217,7 +230,7 @@ class Linear(torch.nn.Module):
         # register the weight matrix as a trainable parameter.
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
-        # extra book-keeping for the weight tensor. 
+        # extra book-keeping for the weight tensor.
         # this is needed by AxoNN layer in the sync_gradients and
         # gradient clipping functions.
         setattr(self.weight, "is_tensor_parallel", True)
@@ -267,9 +280,11 @@ class Linear(torch.nn.Module):
             # extra communication to transition from pure data parallelism
             # to 4D hybrid parallelism
             inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
-            x = GatherBatchScatterChannels.apply(x, inner_group_batch_sizes, self.inner_group)
+            x = GatherBatchScatterChannels.apply(
+                x, inner_group_batch_sizes, self.inner_group
+            )
             outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
-            x  = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
+            x = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
         x = AsyncLinear.apply(
             x,
             weight,
@@ -282,7 +297,9 @@ class Linear(torch.nn.Module):
         if not self.expert_mode:
             # extra communication to transition from 4D hybrid parallelism
             # to pure data parallelism
-            x = GatherChannelsScatterBatch.apply(x, outer_group_batch_sizes, self.outer_group)
+            x = GatherChannelsScatterBatch.apply(
+                x, outer_group_batch_sizes, self.outer_group
+            )
             x = Dropv.apply(x, inner_group_batch_sizes, self.inner_group)
 
         x = x.reshape(*original_shape_x[:-1], x.shape[-1])
@@ -292,10 +309,7 @@ class Linear(torch.nn.Module):
         else:
             bias = self.bias
             if not self.expert_mode:
-                bias = Gather.apply(
-                    bias,
-                    self.outer_group 
-                )
+                bias = Gather.apply(bias, self.outer_group)
             if self.skip_bias_add:
                 return x, bias
             else:
@@ -344,10 +358,7 @@ class Linear(torch.nn.Module):
             )
             if bias is not None:
                 if bias.size(0) == self.out_features:
-                    bias = Drop.apply(
-                        bias,
-                        self.outer_group
-                    )
+                    bias = Drop.apply(bias, self.outer_group)
                     state_dict[prefix + "bias"] = bias
                 else:
                     assert (

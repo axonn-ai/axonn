@@ -1,4 +1,4 @@
-# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# Copyright 2023-2024 Parallel Software and Systems Group, University of Maryland.
 # See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -55,7 +55,9 @@ def clear_weights_cache():
 def trigger_async_all_gathers(model):
     global weights_cache
     for module in model.modules():
-        if isinstance(module, axonn.intra_layer.Linear) or isinstance(module, axonn.intra_layer.Conv2d):
+        if isinstance(module, axonn.intra_layer.Linear) or isinstance(
+            module, axonn.intra_layer.Conv2d
+        ):
             weight = module.weight
             if weight not in weights_cache:
                 # only trigger all gathers if not in cache

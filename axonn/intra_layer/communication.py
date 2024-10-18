@@ -1,7 +1,12 @@
+# Copyright 2023-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch.distributed as dist
 import torch
-import axonn
 import axonn.intra_layer.overlap_communication as overlap_communication
+
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
     input_ = input_.contiguous()
@@ -86,7 +91,6 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     if overlap_comm:
         overlap_communication.register_handle(handle)
     return output
-
 
 
 class ForwardAllReduce(torch.autograd.Function):

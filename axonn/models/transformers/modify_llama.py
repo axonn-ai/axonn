@@ -1,3 +1,8 @@
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, ACT2FN
 from axonn.intra_layer import Linear
 from typing import Optional

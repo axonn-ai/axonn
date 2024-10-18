@@ -1,4 +1,4 @@
-# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
 # See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -36,7 +36,10 @@ from lightning.fabric.utilities.distributed import (
 from lightning.fabric.utilities.distributed import group as _group
 from lightning.fabric.utilities.rank_zero import rank_zero_only
 from lightning.fabric.utilities.types import _PATH
-from lightning.fabric.strategies.fsdp import _activation_checkpointing_kwargs, _setup_activation_checkpointing
+from lightning.fabric.strategies.fsdp import (
+    _activation_checkpointing_kwargs,
+    _setup_activation_checkpointing,
+)
 
 from axonn import axonn as ax
 from axonn.intra_layer import (
@@ -67,8 +70,10 @@ class AxonnStrategy(ParallelStrategy):
         G_intra_c: int = 1,
         G_intra_d: int = 1,
         overlap_communication=False,
-        activation_checkpointing: Optional[Union[Type[Module], List[Type[Module]]]] = None,
-        activation_checkpointing_policy: Optional["_POLICY"] = None,
+        activation_checkpointing: Optional[
+            Union[Type[Module], List[Type[Module]]]
+        ] = None,
+        activation_checkpointing_policy: Optional["_POLICY"] = None,  # noqa: F821
     ) -> None:
         super().__init__(
             accelerator=accelerator,
@@ -86,7 +91,7 @@ class AxonnStrategy(ParallelStrategy):
         self.G_intra_d = G_intra_d
         self._backward_sync_control = _AxoNNBackwardSyncControl()
         self.overlap_communication = overlap_communication
-        
+
         self._activation_checkpointing_kwargs = _activation_checkpointing_kwargs(
             activation_checkpointing, activation_checkpointing_policy
         )
@@ -114,13 +119,13 @@ class AxonnStrategy(ParallelStrategy):
     def distributed_sampler_kwargs(self) -> Dict[str, Any]:
         return {
             "num_replicas": torch.distributed.get_world_size(),
-            "rank": torch.distributed.get_rank()
+            "rank": torch.distributed.get_rank(),
         }
-        #return {
+        # return {
         #    "num_replicas": ax.config.G_intra_d * ax.config.G_data,
         #    "rank": ax.config.G_intra_d * ax.config.data_parallel_rank
         #    + ax.config.intra_layer_depth_parallel_rank,
-        #}
+        # }
 
     @property
     def process_group_backend(self) -> Optional[str]:

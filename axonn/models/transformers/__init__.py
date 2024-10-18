@@ -1,3 +1,8 @@
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 from contextlib import contextmanager
 from transformers import AutoConfig
 from .modify_opt import monkey_patch_opt_with_axonn, reverse_monkey_patch_opt_with_axonn
