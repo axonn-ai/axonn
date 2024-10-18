@@ -1,3 +1,8 @@
+# Copyright 2021-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from typing import List

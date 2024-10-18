@@ -1,4 +1,4 @@
-# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# Copyright 2021-2024 Parallel Software and Systems Group, University of Maryland.
 # See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -6,7 +6,6 @@
 import os
 
 try:
-    # from mpi4py import MPI
     import mpi4py
 
     MPI4PY = True
@@ -112,7 +111,7 @@ class communication_handle:
         if not torch.distributed.is_initialized():
             init_method = "tcp://"
             master_ip = os.getenv("MASTER_ADDR", "localhost")
-            master_port = os.getenv("MASTER_PORT", "6000")
+            master_port = os.getenv("MASTER_PORT", "29500")
             init_method += master_ip + ":" + master_port
             torch.distributed.init_process_group(
                 backend="nccl",

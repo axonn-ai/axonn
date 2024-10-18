@@ -1,17 +1,56 @@
+# Copyright 2023-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch.distributed as dist
 import torch
+
 from torch.autograd import Function
-from torch.cuda.amp import custom_fwd, custom_bwd
+
 import math
 
 from axonn import axonn as ax
-import axonn
 from .communication import (
     Drop,
     Gather,
     _gather,
     _reduce_scatter,
 )
+import axonn.intra_layer.overlap_communication as overlap_communication
+from .asym_communication import (
+    Gatherv,
+    Dropv,
+    GatherBatchScatterChannels,
+    GatherChannelsScatterBatch,
+    gather_batch_sizes,
+)
+
+
+# Wrapper for custom_fwd to handle different versions of PyTorch
+def version_aware_custom_fwd(*args, **kwargs):
+    version = torch.__version__.split(".")
+    major_version = int(version[0])
+    minor_version = int(version[1])
+    if major_version > 2 or (major_version == 2 and minor_version >= 4):
+        # For PyTorch version >= 2.4, pass device_type="cuda"
+        return torch.amp.custom_fwd(device_type="cuda")(*args, **kwargs)
+    else:
+        # For PyTorch version < 2.4, no arguments are required
+        return torch.cuda.amp.custom_fwd(*args, **kwargs)
+
+
+# Wrapper for custom_bwd to handle different versions of PyTorch
+def version_aware_custom_bwd(*args, **kwargs):
+    version = torch.__version__.split(".")
+    major_version = int(version[0])
+    minor_version = int(version[1])
+    if major_version > 2 or (major_version == 2 and minor_version >= 4):
+        # For PyTorch version >= 2.4, pass device_type="cuda"
+        return torch.amp.custom_bwd(device_type="cuda")(*args, **kwargs)
+    else:
+        # For PyTorch version < 2.4, no arguments are required
+        return torch.cuda.amp.custom_bwd(*args, **kwargs)
 
 
 def divide(a, b):
@@ -55,7 +94,7 @@ def default_init_method(weight):
 
 class AsyncLinear(Function):
     @staticmethod
-    @custom_fwd
+    @version_aware_custom_fwd
     def forward(
         ctx,
         input_,
@@ -65,8 +104,6 @@ class AsyncLinear(Function):
         depth_parallel_group,
         local_weight_shape,
         cache_weights,
-        backward_comm_async,
-        forward_comm_async,
     ):
         original_weight = weight
         weight = _gather(
@@ -76,30 +113,14 @@ class AsyncLinear(Function):
         ctx.save_for_backward(input_, original_weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
-        ctx.backward_comm_async = backward_comm_async
         ctx.shape = local_weight_shape
-        if not forward_comm_async:
-            output = input_.matmul(weight.t())
-            dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
-        else:
-            assert input_.shape[0] % 2 == 0
-            input_chunks = torch.chunk(input_, 2)  # each chunk is a view of the tensor
-            output_shape = list(input_.shape)
-            output_shape[-1] = weight.shape[0]
-            outputs = []
-            outputs.append(input_chunks[0].matmul(weight.t()))
-            handle = dist.all_reduce(
-                outputs[-1], group=forward_all_reduce_group, async_op=True
-            )
-            outputs.append(input_chunks[1].matmul(weight.t()))
-            dist.all_reduce(outputs[-1], group=forward_all_reduce_group, async_op=False)
-            handle.wait()  # this call might be unnecessary
-            output = torch.cat(outputs)
+        output = input_.matmul(weight.t())
+        dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
 
         return output
 
     @staticmethod
-    @custom_bwd
+    @version_aware_custom_bwd
     def backward(ctx, grad_output):
         input_, original_weight = ctx.saved_tensors
         weight = _gather(
@@ -107,7 +128,8 @@ class AsyncLinear(Function):
         )
         weight = weight.reshape(ctx.shape)
         handle = None
-        overlap_reduce_scatter = axonn.intra_layer.OVERLAP_REDUCE_SCATTER
+        overlap_reduce_scatter = overlap_communication.OVERLAP_REDUCE_SCATTER
+        overlap_all_reduce = overlap_communication.OVERLAP_ALL_REDUCE
         if dist.get_world_size(ctx.backward_all_reduce_group) > 1 or (
             not overlap_reduce_scatter
         ):
@@ -118,7 +140,7 @@ class AsyncLinear(Function):
                 handle = dist.all_reduce(
                     grad_input,
                     group=ctx.backward_all_reduce_group,
-                    async_op=ctx.backward_comm_async,
+                    async_op=overlap_all_reduce,
                 )
             if ctx.needs_input_grad[1]:
                 grad_weight = (
@@ -127,18 +149,18 @@ class AsyncLinear(Function):
                     .mm(input_.view(-1, input_.shape[-1]))
                 )
 
-            grad_weight = grad_weight.reshape(-1)
-            grad_weight = _reduce_scatter(
-                grad_weight,
-                dim=0,
-                process_group=ctx.depth_parallel_group,
-                overlap_comm=overlap_reduce_scatter,
-            )
+                grad_weight = grad_weight.reshape(-1)
+                grad_weight = _reduce_scatter(
+                    grad_weight,
+                    dim=0,
+                    process_group=ctx.depth_parallel_group,
+                    overlap_comm=overlap_reduce_scatter,
+                )
 
-            if handle and ctx.backward_comm_async:
+            if handle and overlap_all_reduce:
                 handle.wait()
-            if overlap_reduce_scatter:
-                axonn.intra_layer.accumulate_later(original_weight, grad_weight)
+            if overlap_reduce_scatter and ctx.needs_input_grad[1]:
+                overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
             return grad_input, grad_weight, None, None, None, None, None, None, None
         else:
@@ -156,7 +178,7 @@ class AsyncLinear(Function):
                     process_group=ctx.depth_parallel_group,
                     overlap_comm=True,
                 )
-                axonn.intra_layer.accumulate_later(original_weight, grad_weight)
+                overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
 
             if ctx.needs_input_grad[0]:
@@ -178,52 +200,68 @@ class Linear(torch.nn.Module):
         **kwargs
     ):
         super(Linear, self).__init__()
-        self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
-        self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
+
+        # weights are shaped [out_features, in_features]
+        # in_features are distributed across self.inner_group (X tensor parallel group)
+        # out_features are distributed across self.inner_group (Y tensor parallel group)
+        # if transpose is true then X and Y are swapped
+
+        if not transpose:
+            self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
+            self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
+        else:
+            self.inner_group = ax.comm_handle.outer_intra_layer_parallel_group
+            self.outer_group = ax.comm_handle.inner_intra_layer_parallel_group
+
+        # depth_group is the Z tensor parallel group (akin to FSDP)
         self.depth_group = ax.comm_handle.depth_intra_layer_parallel_group
 
+        # calculating the sizes of each tensor parallel process group
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
         self.depth_group_size = dist.get_world_size(self.depth_group)
 
+        # these are the in and out features of the full global weight matrix
         self.in_features = in_features
         self.out_features = out_features
+
+        # expert mode = True -> user needs to parallelize non-linear layers manually
+        # expert mode = False -> non-linear layers are parallelized using
+        #                        data parallelism
+        #                        automatically by AxoNN. This does involve some
+        #                        extra communication
+        #                        at the beginning and end of each linear layer.
         self.expert_mode = expert_mode
 
+        # init_method -> function to initialize the weight matrix
         if init_method is None:
             init_method = default_init_method
 
-        if not transpose:
-            assert in_features % self.inner_group_size == 0
-            assert out_features % self.outer_group_size == 0
-            self.local_in_features = divide(in_features, self.inner_group_size)
-            self.local_out_features = divide(out_features, self.outer_group_size)
-            initial_params = initialize_params(
-                out_features,
-                in_features,
-                self.outer_group,
-                self.inner_group,
-                self.depth_group,
-                init_method,
-            )
-        else:
-            assert out_features % self.inner_group_size == 0
-            assert in_features % self.outer_group_size == 0
-            self.local_in_features = divide(in_features, self.outer_group_size)
-            self.local_out_features = divide(out_features, self.inner_group_size)
-            initial_params = initialize_params(
-                out_features,
-                in_features,
-                self.inner_group,
-                self.outer_group,
-                self.depth_group,
-                init_method,
-            )
-
+        # in_features should be divisible by inner_group_size
+        assert in_features % self.inner_group_size == 0
+        # in_features should be divisible by inner_group_size
+        assert out_features % self.outer_group_size == 0
+        # local_in_features - this is the number of in_features on each GPU
+        self.local_in_features = divide(in_features, self.inner_group_size)
+        # local_out_features - this is the number of out_features on each GPU
+        self.local_out_features = divide(out_features, self.outer_group_size)
+        # initialize the weight matrix and grab the local slice for each GPU
+        initial_params = initialize_params(
+            out_features,
+            in_features,
+            self.outer_group,
+            self.inner_group,
+            self.depth_group,
+            init_method,
+        )
+        # register the weight matrix as a trainable parameter.
         self.weight = torch.nn.Parameter(initial_params, requires_grad=True)
 
+        # extra book-keeping for the weight tensor.
+        # this is needed by AxoNN layer in the sync_gradients and
+        # gradient clipping functions.
         setattr(self.weight, "is_tensor_parallel", True)
-        setattr(self.weight, "needs_gradient_sync", False)
+        setattr(self.weight, "needs_depth_parallel_gradient_sync", False)
         setattr(
             self.weight,
             "process_group_for_norm_reduction",
@@ -237,7 +275,7 @@ class Linear(torch.nn.Module):
                 )
             )
             setattr(self.bias, "is_tensor_parallel", True)
-            setattr(self.bias, "needs_gradient_sync", True)
+            setattr(self.bias, "needs_depth_parallel_gradient_sync", True)
             if not transpose:
                 setattr(
                     self.bias,
@@ -253,66 +291,52 @@ class Linear(torch.nn.Module):
         else:
             self.bias = None
 
-        self.transpose = transpose
         self.skip_bias_add = skip_bias_add
         self._old_load_from_state_dict = self._load_from_state_dict
         self._load_from_state_dict = self._modified_load_from_state_dict
-
-    def get_output_feature_size(self):
-        return self.local_out_features
 
     def forward(
         self,
         x,
         cache_weights_in_all_gather=False,
     ):
-        # gather weights from depth parallel group
-        # reduce scatter in the backward pass
-
+        original_shape_x = x.shape
+        x = x.reshape(-1, x.shape[-1])
         weight = self.weight
-        if not self.transpose:
-            if not self.expert_mode:
-                x = Drop.apply(x, self.inner_group)
-            x = AsyncLinear.apply(
-                x,
-                weight,
-                self.inner_group,
-                self.outer_group,
-                self.depth_group,
-                (self.local_out_features, self.local_in_features),
-                cache_weights_in_all_gather,
-                axonn.intra_layer.OVERLAP_ALL_REDUCE,
-                False,
+        if not self.expert_mode:
+            # extra communication to transition from pure data parallelism
+            # to 4D hybrid parallelism
+            inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
+            x = GatherBatchScatterChannels.apply(
+                x, inner_group_batch_sizes, self.inner_group
             )
-            if not self.expert_mode:
-                x = Gather.apply(x, self.outer_group)
-        else:
-            if not self.expert_mode:
-                x = Drop.apply(x, self.outer_group)
+            outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
+            x = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
+        x = AsyncLinear.apply(
+            x,
+            weight,
+            self.inner_group,
+            self.outer_group,
+            self.depth_group,
+            (self.local_out_features, self.local_in_features),
+            cache_weights_in_all_gather,
+        )
+        if not self.expert_mode:
+            # extra communication to transition from 4D hybrid parallelism
+            # to pure data parallelism
+            x = GatherChannelsScatterBatch.apply(
+                x, outer_group_batch_sizes, self.outer_group
+            )
+            x = Dropv.apply(x, inner_group_batch_sizes, self.inner_group)
 
-            x = AsyncLinear.apply(
-                x,
-                weight,
-                self.outer_group,
-                self.inner_group,
-                self.depth_group,
-                (self.local_out_features, self.local_in_features),
-                cache_weights_in_all_gather,
-                axonn.intra_layer.OVERLAP_ALL_REDUCE,
-                False,
-            )
-            if not self.expert_mode:
-                x = Gather.apply(x, self.inner_group)
+        x = x.reshape(*original_shape_x[:-1], x.shape[-1])
 
         if self.bias is None:
             return x
         else:
             bias = self.bias
             if not self.expert_mode:
-                bias = Gather.apply(
-                    bias,
-                    self.outer_group if not self.transpose else self.inner_group,
-                )
+                bias = Gather.apply(bias, self.outer_group)
             if self.skip_bias_add:
                 return x, bias
             else:
@@ -349,11 +373,6 @@ class Linear(torch.nn.Module):
                     self.outer_group,
                     self.inner_group,
                 )
-                if self.transpose:
-                    out_features_group, in_features_group = (
-                        self.inner_group,
-                        self.outer_group,
-                    )
                 weight = extract_local_params_from_full_params(
                     weight, out_features_group, in_features_group, self.depth_group
                 )
@@ -366,10 +385,7 @@ class Linear(torch.nn.Module):
             )
             if bias is not None:
                 if bias.size(0) == self.out_features:
-                    bias = Drop.apply(
-                        bias,
-                        self.outer_group if not self.transpose else self.inner_group,
-                    )
+                    bias = Drop.apply(bias, self.outer_group)
                     state_dict[prefix + "bias"] = bias
                 else:
                     assert (
