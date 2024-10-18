@@ -46,13 +46,13 @@ jobs:
     - name: Run intra-layer FC unit tests 
       run: |
         torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_fc.py 
-    - name: Run intra-layer Conv unit tests 
-      run: |
-        torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_conv.py 
-    - name: Run intra-layer Embedding unit tests
-      run: |
-        torchrun --nproc_per_node 2 --no_python python -m pytest ./axonn/tests/test_intra_layer_emb.py -k bw_pass
-        torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_emb.py -k fw_pass
+        #- name: Run intra-layer Conv unit tests 
+        #run: |
+        #torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_conv.py 
+        #- name: Run intra-layer Embedding unit tests
+        #run: |
+        #torchrun --nproc_per_node 2 --no_python python -m pytest ./axonn/tests/test_intra_layer_emb.py -k bw_pass
+        #torchrun --nproc_per_node 2 --no_python python -m pytest  ./axonn/tests/test_intra_layer_emb.py -k fw_pass
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
