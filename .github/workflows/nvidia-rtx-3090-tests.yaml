@@ -29,7 +29,7 @@ jobs:
         export G_inter=${{ matrix.ginter }}
         export G_data=$(( 2 / G_inter ))
         echo "training with G_inter = ${G_inter}, G_data = $(( 2 / G_inter  )) ${{ matrix.memopt }}" 
-        mpirun -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
+        PYTHONPATH="." mpirun -n 2 pytest --with-mpi ./axonn/tests/test_vit.py 
     - name: Uninstall AxoNN
       run: |
         pip uninstall --yes axonn
