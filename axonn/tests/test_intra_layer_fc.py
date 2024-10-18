@@ -199,7 +199,6 @@ def test_bw_pass(
         ), "BW Pass - gradients of bias do not match"
 
 
-
 if __name__ == "__main__":
     test_bw_pass(
         G_intra_r=1,
