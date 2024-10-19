@@ -1,0 +1,3 @@
+recursive-include axonn *.py
+prune axonn/tests
+global-exclude __pycache__/
