@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axonn"
-version = "0.1.0.dev2"
+version = "0.1.0.dev3"
 authors = [
   { name="Siddharth Singh", email="ssingh37@umd.edu" },
   { name="Abhinav Bhatele", email="bhatele@cs.umd.edu"},
@@ -29,7 +29,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["axonn"]
-exclude = ["axonn/tests", "**/__pycache__"]
+exclude = ["axonn/tests", "external/", "**__pycache__"]
 
 
 [project.urls]
