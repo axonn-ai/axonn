@@ -128,7 +128,7 @@ def optimize_communication(
     overlap_all_gather=False,
     model_object_for_overlapping_allgathers=None,
     *args,
-    **kwargs
+    **kwargs,
 ):
     global OVERLAP_ALL_REDUCE, OVERLAP_REDUCE_SCATTER
     global ALL_GATHER_ITERATOR

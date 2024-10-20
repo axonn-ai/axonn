@@ -1,0 +1,39 @@
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axonn"
+version = "0.2.0"
+authors = [
+  { name="Siddharth Singh", email="ssingh37@umd.edu" },
+  { name="Abhinav Bhatele", email="bhatele@cs.umd.edu"},
+]
+description = "A parallel library for extreme-scale deep learning"
+readme = "README.md"
+license = { name = "Apache-2.0", file = "LICENSE" }
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "torch"
+]
+
+[tool.setuptools.packages.find]
+include = ["axonn"]
+exclude = ["axonn/tests", "external/", "**__pycache__"]
+
+
+[project.urls]
+Homepage = "https://github.com/axonn-ai/axonn"
+Issues = "https://github.com/axonn-ai/axonn/issues"
+Docs = "https://axonn.readthedocs.io/en/latest/"
+

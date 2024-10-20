@@ -1,4 +1,4 @@
-# <img src="https://github.com/axonn-ai/axonn/blob/c356b821c2020c7dcd2181dfacc226619bfd5240/logo.png" width="64" valign="middle" alt="hatchet"/> AxoNN
+# <img src="https://github.com/axonn-ai/axonn/blob/c356b821c2020c7dcd2181dfacc226619bfd5240/logo.png" width="64" valign="middle" alt="axonn"/> AxoNN
 
 [![nvidia-rtx-3090-tests](https://github.com/axonn-ai/axonn/actions/workflows/ci.yaml/badge.svg)](https://github.com/axonn-ai/axonn/actions/workflows/ci.yaml)
 

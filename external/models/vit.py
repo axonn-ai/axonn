@@ -135,7 +135,7 @@ class DistributedViT(nn.Module):
         dropout=0.0,
         emb_dropout=0.0,
         inter_layer_parallel_rank=0,
-        G_inter=1
+        G_inter=1,
     ):
         super().__init__()
         image_height, image_width = pair(image_size)

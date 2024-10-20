@@ -197,7 +197,7 @@ class Linear(torch.nn.Module):
         skip_bias_add=False,
         init_method=None,
         expert_mode=False,
-        **kwargs
+        **kwargs,
     ):
         super(Linear, self).__init__()
 
