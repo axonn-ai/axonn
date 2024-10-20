@@ -1,6 +1,11 @@
+# Copyright 2023-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch.distributed as dist
 import torch
-import axonn
+import axonn.intra_layer.overlap_communication as overlap_communication
 
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
@@ -10,7 +15,7 @@ def _all_reduce(input_, process_group=None, overlap_comm=False):
             input_.contiguous(), group=process_group, async_op=overlap_comm
         )
         if overlap_comm:
-            axonn.intra_layer.register_handle(handle)
+            overlap_communication.register_handle(handle)
     return input_
 
 
@@ -32,14 +37,14 @@ def _gather(input_, dim, process_group=None, cache=False):
     if dist.get_world_size(process_group) == 1:
         return input_
 
-    if input_ in axonn.intra_layer.weights_cache:
-        output, handle = axonn.intra_layer.retrieve_all_gathered_weight(
+    if input_ in overlap_communication.weights_cache:
+        output, handle = overlap_communication.retrieve_all_gathered_weight(
             input_, delete=not cache
         )
         if handle is not None:
             handle.wait()
             if cache:
-                axonn.intra_layer.weights_cache[input_][1] = None
+                overlap_communication.weights_cache[input_][1] = None
     else:
         input_ = input_.contiguous()
         # Size and dimension.
@@ -55,7 +60,7 @@ def _gather(input_, dim, process_group=None, cache=False):
         output = torch.cat(tensor_list, dim=dim).contiguous()
 
         if cache:
-            axonn.intra_layer.weights_cache[input_] = output, None
+            overlap_communication.weights_cache[input_] = output, None
 
     return output
 
@@ -84,7 +89,7 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         )
 
     if overlap_comm:
-        axonn.intra_layer.register_handle(handle)
+        overlap_communication.register_handle(handle)
     return output
 
 
@@ -120,7 +125,7 @@ class BackwardAllReduce(torch.autograd.Function):
         if not ctx.overlap_comm:
             return grad_input, None, None
         else:
-            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
+            overlap_communication.accumulate_later(ctx.input, grad_input)
             return None, None, None
 
 
@@ -206,5 +211,5 @@ class ForwardGather_BackwardReduceScatter(torch.autograd.Function):
         if not ctx.overlap_comm:
             return (grad_input, None, None, None, None)
         else:
-            axonn.intra_layer.accumulate_later(ctx.input, grad_input)
+            overlap_communication.accumulate_later(ctx.input, grad_input)
             return None, None, None, None, None

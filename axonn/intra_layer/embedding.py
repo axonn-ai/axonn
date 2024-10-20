@@ -1,4 +1,4 @@
-# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
 # See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -139,7 +139,7 @@ class Embedding(torch.nn.Module):
         self.weight = torch.nn.Parameter(initial_params, requires_grad=not _freeze)
 
         setattr(self.weight, "is_tensor_parallel", True)
-        setattr(self.weight, "needs_gradient_sync", False)
+        setattr(self.weight, "needs_depth_parallel_gradient_sync", False)
         setattr(
             self.weight,
             "process_group_for_norm_reduction",

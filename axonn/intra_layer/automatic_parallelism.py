@@ -1,3 +1,8 @@
+# Copyright 2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 import torch.nn as nn
 from axonn import axonn as ax
 from axonn.intra_layer import Linear, Embedding
@@ -70,9 +75,11 @@ class patched_embedding:
 @contextmanager
 def auto_parallelize():
     nn.Linear = patched_linear
-    nn.Embedding = patched_embedding
+    #    nn.Embedding = patched_embedding
     try:
         yield None
     finally:
         nn.Linear = reference_to_original_linear_class
-        nn.Embedding = reference_to_original_embedding_class
+
+
+#        nn.Embedding = reference_to_original_embedding_class

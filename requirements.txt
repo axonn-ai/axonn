@@ -1,5 +1,0 @@
-torchvision
-einops
-tqdm
-
--e .

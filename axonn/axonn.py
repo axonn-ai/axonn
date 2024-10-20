@@ -1,4 +1,4 @@
-# Copyright 2021 Parallel Software and Systems Group, University of Maryland.
+# Copyright 2021-2024 Parallel Software and Systems Group, University of Maryland.
 # See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -8,14 +8,6 @@ from . import config
 from typing import Optional
 from .communication import communication_handle
 import torch
-
-try:
-    import mpi4py
-
-    MPI4PY = True
-    mpi4py.rc.initialize = False  # do not initialize MPI automatically
-except ImportError:
-    MPI4PY = False
 
 # True when init has been called
 is_initialized = False

@@ -1,11 +1,16 @@
+# Copyright 2021-2024 Parallel Software and Systems Group, University of Maryland.
+# See the top-level LICENSE file for details.
+#
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# from . import models  # noqa: F401
+
+
 from enum import Enum
 from dataclasses import dataclass
 from axonn import axonn as ax
 from mpi4py import MPI
-from axonn.intra_layer import (
-    sync_gradients_data_parallel,
-    sync_gradients_depth_parallel,
-)
+from axonn.intra_layer import sync_gradients
+
 import torch
 import numpy as np
 
@@ -418,8 +423,7 @@ class AxoNN_Inter_Layer_Engine:
             assert not eval_mode
             post_bw_hook(self.model)
 
-        sync_gradients_depth_parallel(self.model, mean=True)
-        sync_gradients_data_parallel(self.model, mean=True)
+        sync_gradients(self.model, mean=True, expert_mode=True)
         if self.computation_dtype == torch.float16:
             global_overflow = self._unscale_gradients()
             if not global_overflow:
