@@ -15,6 +15,7 @@ def print_rank(msg):
 
 @torch.no_grad()
 def gather_batch_sizes(local_batch_size, process_group=None):
+    ax.get_timers().start("gather-batch-sizes")
     world_size = dist.get_world_size(process_group)
     local_batch_tensor = torch.tensor(local_batch_size, device="cuda")
     global_batch_tensor = torch.empty(
@@ -23,11 +24,15 @@ def gather_batch_sizes(local_batch_size, process_group=None):
     dist.all_gather_into_tensor(
         global_batch_tensor, local_batch_tensor, group=process_group
     )
-    return global_batch_tensor.cpu()
+
+    global_batch_tensor = global_batch_tensor.cpu()
+    ax.get_timers().stop("gather-batch-sizes")
+    return global_batch_tensor
 
 
 @torch.no_grad()
 def _allgatherv(tensor, rank_local_batch_sizes, process_group=None):
+    ax.get_timers().start("allgatherv")
     output_tensor_list = []
     for batch_size in rank_local_batch_sizes:
         shape = list(tensor.shape)
@@ -37,6 +42,7 @@ def _allgatherv(tensor, rank_local_batch_sizes, process_group=None):
         )
     input_tensor_list = [tensor.contiguous() for _ in rank_local_batch_sizes]
     dist.all_to_all(output_tensor_list, input_tensor_list, group=process_group)
+    ax.get_timers().stop("allgatherv")
     return torch.cat(output_tensor_list)
 
 
@@ -57,10 +63,12 @@ class Gatherv(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_, rank_local_batch_sizes, process_group=None):
+        ax.get_timers().start("extra-non-expert-communication")
         output = _allgatherv(input_, rank_local_batch_sizes, process_group)
         ctx.save_for_backward(rank_local_batch_sizes)
         # print_rank(f"Gatherv forward - {rank_local_batch_sizes}")
         ctx.process_group = process_group
+        ax.get_timers().stop("extra-non-expert-communication")
         return output
 
     @staticmethod
@@ -105,9 +113,11 @@ class Dropv(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        ax.get_timers().start("extra-non-expert-communication")
         (rank_local_batch_sizes,) = ctx.saved_tensors
         # print_rank("Start - DropVBack")
         grad_input = _allgatherv(grad_output, rank_local_batch_sizes, ctx.process_group)
+        ax.get_timers().stop("extra-non-expert-communication")
         # print_rank("End - DropVBack")
         return grad_input, None, None
 
@@ -116,6 +126,8 @@ class Dropv(torch.autograd.Function):
 def _gather_batch_scatter_channels(input_, rank_local_batch_sizes, process_group=None):
     # if input in GPU i is of shape [m_{i},...,k], and process group size is G
     # then this returns a tensor of [sum_{i}(m_{i}),....,k/G].
+    ax.get_timers().start("gather-batch-scatter-channels")
+    ax.get_timers().start("alltoallv")
     input_ = input_.contiguous()
     world_size = torch.distributed.get_world_size(process_group)
     send_tensors = list(torch.chunk(input_, world_size, dim=-1))
@@ -130,6 +142,8 @@ def _gather_batch_scatter_channels(input_, rank_local_batch_sizes, process_group
             torch.empty(tuple(shape), device="cuda", dtype=input_.dtype)
         )
     torch.distributed.all_to_all(recv_tensors, send_tensors, group=process_group)
+    ax.get_timers().stop("alltoallv")
+    ax.get_timers().stop("gather-batch-scatter-channels")
     return torch.cat(recv_tensors, dim=0)
 
 
@@ -138,6 +152,8 @@ def _gather_channels_scatter_batch(input_, rank_local_batch_sizes, process_group
     # if input in GPU i is of shape [m,...,k/G], and process group size is G
     # then this returns a tensor of [m_{i},....,k],
     # where m_{i} = rank_local_batch_sizes[i]
+    ax.get_timers().start("gather-channels-scatter-batch")
+    ax.get_timers().start("alltoallv")
     input_ = input_.contiguous()
     world_size = torch.distributed.get_world_size(process_group)
     send_tensors = list(torch.split(input_, list(rank_local_batch_sizes), dim=0))
@@ -152,6 +168,8 @@ def _gather_channels_scatter_batch(input_, rank_local_batch_sizes, process_group
         )
 
     torch.distributed.all_to_all(recv_tensors, send_tensors, group=process_group)
+    ax.get_timers().stop("gather-channels-scatter-batch")
+    ax.get_timers().stop("alltoallv")
     return torch.cat(recv_tensors, dim=-1)
 
 
@@ -172,20 +190,24 @@ class GatherBatchScatterChannels(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_, rank_local_batch_sizes, process_group=None):
+        ax.get_timers().start("extra-non-expert-communication")
         output = _gather_batch_scatter_channels(
             input_, rank_local_batch_sizes, process_group
         )
         ctx.process_group = process_group
         ctx.save_for_backward(rank_local_batch_sizes)
+        ax.get_timers().stop("extra-non-expert-communication")
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
+        ax.get_timers().start("extra-non-expert-communication")
         (rank_local_batch_sizes,) = ctx.saved_tensors
         # print_rank("Start - GBSC back")
         grad_input = _gather_channels_scatter_batch(
             grad_output, rank_local_batch_sizes, ctx.process_group
         )
+        ax.get_timers().stop("extra-non-expert-communication")
         # print_rank("End - GBSC back")
         return grad_input, None, None
 
@@ -208,21 +230,25 @@ class GatherChannelsScatterBatch(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_, rank_local_batch_sizes, process_group=None):
+        ax.get_timers().start("extra-non-expert-communication")
         output = _gather_channels_scatter_batch(
             input_, rank_local_batch_sizes, process_group
         )
         ctx.process_group = process_group
         ctx.save_for_backward(rank_local_batch_sizes)
+        ax.get_timers().stop("extra-non-expert-communication")
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
+        ax.get_timers().start("extra-non-expert-communication")
         (rank_local_batch_sizes,) = ctx.saved_tensors
         # print_rank("Start - GCSB  back")
         grad_input = _gather_batch_scatter_channels(
             grad_output, rank_local_batch_sizes, ctx.process_group
         )
         # print_rank("End - GCSB  back")
+        ax.get_timers().stop("extra-non-expert-communication")
         return grad_input, None, None
 
 
