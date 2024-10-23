@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 from axonn import axonn as ax
 
+
 def print_rank(msg):
     if dist.get_rank() == 0:
         print(f"{dist.get_rank()} | {msg}")
@@ -27,6 +28,7 @@ def gather_batch_sizes(local_batch_size, process_group=None):
     global_batch_tensor = global_batch_tensor.cpu()
     ax.get_timers().stop("gather-batch-sizes")
     return global_batch_tensor
+
 
 @torch.no_grad()
 def _allgatherv(tensor, rank_local_batch_sizes, process_group=None):

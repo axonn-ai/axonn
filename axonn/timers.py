@@ -3,13 +3,14 @@ from collections import defaultdict
 from collections import deque
 import axonn
 
-class Timers():
+
+class Timers:
     def __init__(self):
         self.timers = defaultdict(list)
         self.curr_index = defaultdict(int)
         self.stack = deque()
 
-    def start(self, key): 
+    def start(self, key):
         if not axonn.axonn.enable_timers:
             return
         self.stack.append(key)
@@ -18,7 +19,9 @@ class Timers():
         timers = self.timers[key]
         assert index == len(timers) or index < len(timers)
         if index == len(timers):
-            self.timers[key].append([torch.cuda.Event(enable_timing=True) for _ in range(2)])
+            self.timers[key].append(
+                [torch.cuda.Event(enable_timing=True) for _ in range(2)]
+            )
         self.timers[key][index][0].record()
 
     def stop(self, key):

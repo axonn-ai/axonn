@@ -25,7 +25,7 @@ def init(
     G_intra_c: int = 1,
     G_intra_d: int = 1,
     gpus_per_node: Optional[int] = None,
-    enable_internal_timers: bool = False
+    enable_internal_timers: bool = False,
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -119,6 +119,7 @@ def create_dataloader(
         *args,
         **kwargs,
     )  # not working with drop_last=False
+
 
 def get_timers():
     global timers
