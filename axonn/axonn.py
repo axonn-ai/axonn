@@ -8,11 +8,14 @@ from . import config
 from typing import Optional
 from .communication import communication_handle
 import torch
+from .timers import Timers
 
 # True when init has been called
 is_initialized = False
 # Communication handle for point-to-point (MPI) and collective (NCCL) communication
 comm_handle = None
+enable_timers = False
+timers = None
 
 
 def init(
@@ -22,6 +25,7 @@ def init(
     G_intra_c: int = 1,
     G_intra_d: int = 1,
     gpus_per_node: Optional[int] = None,
+    enable_internal_timers: bool = False
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -35,9 +39,12 @@ def init(
         AxoNN just creates the required process groups.
         gpus_per_node (int, optional):  number of GPUs per node, if not
             provided this is inferred using pytorch
+        enable_internal_timers (bool): enable AxoNN's internal timers. This will give
+        you information about time spent in synchronous communication regions
+        and matrix multiplications.
 
     """
-    global comm_handle, is_initialized
+    global comm_handle, is_initialized, enable_timers, timers
     comm_handle = communication_handle(
         G_inter, G_data, G_intra_r, G_intra_c, G_intra_d, gpus_per_node=gpus_per_node
     )
@@ -56,6 +63,8 @@ def init(
         comm_handle.intra_layer_column_parallel_rank
     )
     is_initialized = True
+    enable_timers = enable_internal_timers
+    timers = Timers()
 
 
 def create_dataloader(
@@ -110,3 +119,7 @@ def create_dataloader(
         *args,
         **kwargs,
     )  # not working with drop_last=False
+
+def get_timers():
+    global timers
+    return timers

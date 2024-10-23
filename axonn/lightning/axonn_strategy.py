@@ -70,6 +70,7 @@ class AxonnStrategy(ParallelStrategy):
         G_intra_c: int = 1,
         G_intra_d: int = 1,
         overlap_communication=False,
+        enable_timers = False, 
         activation_checkpointing: Optional[
             Union[Type[Module], List[Type[Module]]]
         ] = None,
@@ -91,6 +92,7 @@ class AxonnStrategy(ParallelStrategy):
         self.G_intra_d = G_intra_d
         self._backward_sync_control = _AxoNNBackwardSyncControl()
         self.overlap_communication = overlap_communication
+        self.enable_timers = enable_timers
 
         self._activation_checkpointing_kwargs = _activation_checkpointing_kwargs(
             activation_checkpointing, activation_checkpointing_policy
@@ -216,6 +218,7 @@ class AxonnStrategy(ParallelStrategy):
             G_intra_r=self.G_intra_r,
             G_intra_c=self.G_intra_c,
             G_intra_d=self.G_intra_d,
+            enable_internal_timers=self.enable_timers
         )
 
     def _get_process_group_backend(self) -> str:
@@ -315,6 +318,11 @@ class AxonnStrategy(ParallelStrategy):
     @override
     def module_sharded_context(self) -> ContextManager:
         return auto_parallelize()
+
+
+    def get_timers(self):
+        assert self.enable_timers, "you should set enable_timers=True in AxoNNStrategy"
+        return ax.get_timers()
 
 
 class _AxoNNBackwardSyncControl(_BackwardSyncControl):
