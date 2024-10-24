@@ -40,8 +40,8 @@ modify_dict = {
 
 
 @contextmanager
-def parallelize(model_id):
-    config = AutoConfig.from_pretrained(model_id)
+def parallelize(model_id, model_kwargs={}):
+    config = AutoConfig.from_pretrained(model_id, **model_kwargs)
     architecture = config.architectures[0]
     # config.architectures is a list, not sure what to do
     # if it has multiple elements
