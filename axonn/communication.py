@@ -15,6 +15,7 @@ except ImportError:
     MPI4PY = False
 import torch
 import numpy as np
+from typing import Sequence, Optional
 
 
 class communication_handle:
@@ -160,11 +161,20 @@ class communication_handle:
             self.inner_intra_layer_parallel_group,
             self.outer_intra_layer_parallel_group,
             self.depth_intra_layer_parallel_group,
-        ) = self.get_intra_layer_groups(G_intra_r, G_intra_c, G_intra_d)
+        ) = self.get_intra_layer_groups()
 
-    def get_intra_layer_groups(self, G_intra_r, G_intra_c, G_intra_d):
+    def get_intra_layer_groups(
+        self, tensor_parallel_dims: Optional[Sequence[int]] = None
+    ):
         G_inter, G_data, G_intra = self.G_inter, self.G_data, self.G_intra
-
+        if tensor_parallel_dims is None:
+            G_intra_r, G_intra_c, G_intra_d = (
+                self.G_intra_r,
+                self.G_intra_c,
+                self.G_intra_d,
+            )
+        else:
+            G_intra_r, G_intra_c, G_intra_d = tensor_parallel_dims
         # first check if these communicators have already
         # been created
         group_key = (G_intra_r, G_intra_c, G_intra_d)
