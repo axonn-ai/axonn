@@ -25,6 +25,7 @@ from .asym_communication import (
     GatherChannelsScatterBatch,
     gather_batch_sizes,
 )
+from typing import Optional, Sequence
 
 
 # Wrapper for custom_fwd to handle different versions of PyTorch
@@ -197,6 +198,7 @@ class Linear(torch.nn.Module):
         skip_bias_add=False,
         init_method=None,
         expert_mode=False,
+        tensor_parallel_dims: Optional[Sequence[int]] = None,
         **kwargs,
     ):
         super(Linear, self).__init__()
@@ -205,13 +207,16 @@ class Linear(torch.nn.Module):
         # in_features are distributed across self.inner_group (X tensor parallel group)
         # out_features are distributed across self.inner_group (Y tensor parallel group)
         # if transpose is true then X and Y are swapped
-
-        if not transpose:
-            self.inner_group = ax.comm_handle.inner_intra_layer_parallel_group
-            self.outer_group = ax.comm_handle.outer_intra_layer_parallel_group
-        else:
-            self.inner_group = ax.comm_handle.outer_intra_layer_parallel_group
-            self.outer_group = ax.comm_handle.inner_intra_layer_parallel_group
+        if tensor_parallel_dims is not None and torch.distributed.get_rank() == 0:
+            print(
+                "Manually setting TP dims for a layer with shape",
+                f" - {(in_features, out_features)} | tp-dims = {tensor_parallel_dims}",
+            )
+        self.inner_group, self.outer_group, self.depth_group = (
+            ax.comm_handle.get_intra_layer_groups(tensor_parallel_dims)
+        )
+        if transpose:
+            self.inner_group, self.outer_group = self.outer_group, self.inner_group
 
         # depth_group is the Z tensor parallel group (akin to FSDP)
         self.depth_group = ax.comm_handle.depth_intra_layer_parallel_group
@@ -303,7 +308,7 @@ class Linear(torch.nn.Module):
         original_shape_x = x.shape
         x = x.reshape(-1, x.shape[-1])
         weight = self.weight
-        if not self.expert_mode:
+        if not self.expert_mode and (self.inner_group_size * self.outer_group_size > 1):
             # extra communication to transition from pure data parallelism
             # to 4D hybrid parallelism
             inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
@@ -321,7 +326,7 @@ class Linear(torch.nn.Module):
             (self.local_out_features, self.local_in_features),
             cache_weights_in_all_gather,
         )
-        if not self.expert_mode:
+        if not self.expert_mode and (self.inner_group_size * self.outer_group_size > 1):
             # extra communication to transition from 4D hybrid parallelism
             # to pure data parallelism
             x = GatherChannelsScatterBatch.apply(
