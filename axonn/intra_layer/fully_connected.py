@@ -306,12 +306,14 @@ class Linear(torch.nn.Module):
         if not self.expert_mode:
             # extra communication to transition from pure data parallelism
             # to 4D hybrid parallelism
-            inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
-            x = GatherBatchScatterChannels.apply(
-                x, inner_group_batch_sizes, self.inner_group
-            )
-            outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
-            x = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
+            if self.inner_group_size > 1:
+                inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
+                x = GatherBatchScatterChannels.apply(
+                    x, inner_group_batch_sizes, self.inner_group
+                )
+            if self.outer_group_size > 1:
+                outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
+                x = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
         x = AsyncLinear.apply(
             x,
             weight,
@@ -324,10 +326,12 @@ class Linear(torch.nn.Module):
         if not self.expert_mode:
             # extra communication to transition from 4D hybrid parallelism
             # to pure data parallelism
-            x = GatherChannelsScatterBatch.apply(
-                x, outer_group_batch_sizes, self.outer_group
-            )
-            x = Dropv.apply(x, inner_group_batch_sizes, self.inner_group)
+            if self.outer_group_size > 1:
+                x = GatherChannelsScatterBatch.apply(
+                    x, outer_group_batch_sizes, self.outer_group
+                )
+            if self.inner_group_size > 1:
+                x = Dropv.apply(x, inner_group_batch_sizes, self.inner_group)
 
         x = x.reshape(*original_shape_x[:-1], x.shape[-1])
 
