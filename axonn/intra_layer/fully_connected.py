@@ -307,12 +307,16 @@ class Linear(torch.nn.Module):
             # extra communication to transition from pure data parallelism
             # to 4D hybrid parallelism
             if self.inner_group_size > 1:
-                inner_group_batch_sizes = gather_batch_sizes(x.shape[0], self.inner_group)
+                inner_group_batch_sizes = gather_batch_sizes(
+                    x.shape[0], self.inner_group
+                )
                 x = GatherBatchScatterChannels.apply(
                     x, inner_group_batch_sizes, self.inner_group
                 )
             if self.outer_group_size > 1:
-                outer_group_batch_sizes = gather_batch_sizes(x.shape[0], self.outer_group)
+                outer_group_batch_sizes = gather_batch_sizes(
+                    x.shape[0], self.outer_group
+                )
                 x = Gatherv.apply(x, outer_group_batch_sizes, self.outer_group)
         x = AsyncLinear.apply(
             x,
