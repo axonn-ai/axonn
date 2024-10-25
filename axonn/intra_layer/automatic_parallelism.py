@@ -31,9 +31,20 @@ def is_parallelizable_embedding(num_embeddings, embedding_dim):
 
 
 class patched_linear:
-    def __new__(cls, in_features, out_features, bias=True, device=None, dtype=None):
+    def __new__(
+        cls,
+        in_features,
+        out_features,
+        *args,
+        bias=True,
+        device=None,
+        dtype=None,
+        **kwargs,
+    ):
         if is_parallelizable_linear(in_features, out_features):
-            parallel_layer = Linear(in_features, out_features, bias=bias)
+            parallel_layer = Linear(
+                in_features, out_features, bias=bias, *args, **kwargs
+            )
             if device is not None:
                 parallel_layer = parallel_layer.to(device)
             if dtype is not None:
@@ -41,7 +52,7 @@ class patched_linear:
             return parallel_layer
         else:
             sequential_layer = reference_to_original_linear_class(
-                in_features, out_features, bias=bias
+                in_features, out_features, bias=bias, *args, **kwargs
             )
             if device is not None:
                 sequential_layer = sequential_layer.to(device)
