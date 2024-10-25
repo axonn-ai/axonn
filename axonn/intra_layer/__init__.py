@@ -125,6 +125,7 @@ def sync_gradients(
             model, gradient_attr_name, mean, vectorize
         )
         return
+    ax.get_timers().start("sync-gradients-non-expert")
     grads_to_sync = {
         "tensor_parallel_weights": [],
         "tensor_parallel_biases": [],
@@ -166,8 +167,11 @@ def sync_gradients(
             if mean:
                 grad.div_(torch.distributed.get_world_size())
 
+        ax.get_timers().start("AR-others-world")
         for grad in grads_to_sync["others"]:
             # all other weights are purely data parallel
             dist.all_reduce(grad)
             if mean:
                 grad.div_(torch.distributed.get_world_size())
+        ax.get_timers().stop("AR-others-world")
+    ax.get_timers().stop("sync-gradients-non-expert")
