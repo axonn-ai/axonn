@@ -161,6 +161,8 @@ class communication_handle:
             self.inner_intra_layer_parallel_group,
             self.outer_intra_layer_parallel_group,
             self.depth_intra_layer_parallel_group,
+            self.inner_intra_layer_parallel_group_gloo,
+            self.outer_intra_layer_parallel_group_gloo,
         ) = self.get_intra_layer_groups()
 
     def get_intra_layer_groups(
@@ -200,8 +202,14 @@ class communication_handle:
                         group = torch.distributed.new_group(
                             ranks=group_members, backend="nccl"
                         )
+
+                        group_gloo = torch.distributed.new_group(
+                            ranks=group_members, backend="gloo"
+                        )
+
                         if self.world_rank in group_members:
                             inner_intra_layer_parallel_group = group
+                            inner_intra_layer_parallel_group_gloo = group_gloo
 
                 # outer/row
                 for i in range(G_intra_d):
@@ -212,8 +220,13 @@ class communication_handle:
                         group = torch.distributed.new_group(
                             ranks=group_members, backend="nccl"
                         )
+
+                        group_gloo = torch.distributed.new_group(
+                            ranks=group_members, backend="gloo"
+                        )
                         if self.world_rank in group_members:
                             outer_intra_layer_parallel_group = group
+                            outer_intra_layer_parallel_group_gloo = group_gloo
 
                 # depth/fsdp
                 for i in range(G_intra_r):
@@ -231,6 +244,8 @@ class communication_handle:
             inner_intra_layer_parallel_group,
             outer_intra_layer_parallel_group,
             depth_intra_layer_parallel_group,
+            inner_intra_layer_parallel_group_gloo,
+            outer_intra_layer_parallel_group_gloo,
         )
 
         return self.intra_layer_group_cache[group_key]
