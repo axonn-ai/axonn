@@ -106,6 +106,7 @@ class AsyncLinear(Function):
         local_weight_shape,
         cache_weights,
     ):
+        ax.get_timers().start("forward-async")
         original_weight = weight
         weight = _gather(
             weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
@@ -115,14 +116,17 @@ class AsyncLinear(Function):
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.shape = local_weight_shape
+        ax.get_timers().start("compute")
         output = input_.matmul(weight.t())
+        ax.get_timers().stop("compute")
         dist.all_reduce(output, group=forward_all_reduce_group, async_op=False)
-
+        ax.get_timers().stop("forward-async")
         return output
 
     @staticmethod
     @version_aware_custom_bwd
     def backward(ctx, grad_output):
+        ax.get_timers().start("backward-async")
         input_, original_weight = ctx.saved_tensors
         weight = _gather(
             original_weight, dim=0, process_group=ctx.depth_parallel_group, cache=False
@@ -137,18 +141,22 @@ class AsyncLinear(Function):
             grad_input, grad_weight = None, None
 
             if ctx.needs_input_grad[0]:
+                ax.get_timers().start("compute")
                 grad_input = grad_output.matmul(weight)
+                ax.get_timers().stop("compute")
                 handle = dist.all_reduce(
                     grad_input,
                     group=ctx.backward_all_reduce_group,
                     async_op=overlap_all_reduce,
                 )
             if ctx.needs_input_grad[1]:
+                ax.get_timers().start("compute")
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 )
+                ax.get_timers().stop("compute")
 
                 grad_weight = grad_weight.reshape(-1)
                 grad_weight = _reduce_scatter(
@@ -163,27 +171,35 @@ class AsyncLinear(Function):
             if overlap_reduce_scatter and ctx.needs_input_grad[1]:
                 overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
+            ax.get_timers().stop("backward-async")
             return grad_input, grad_weight, None, None, None, None, None, None, None
         else:
             grad_input, grad_weight = None, None
 
             if ctx.needs_input_grad[1]:
+                ax.get_timers().start("compute")
                 grad_weight = (
                     grad_output.reshape(-1, grad_output.shape[-1])
                     .t()
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
+                ax.get_timers().stop("compute")
+                #ax.get_timers().start("reduce-scatter")
                 grad_weight = _reduce_scatter(
                     grad_weight,
                     dim=0,
                     process_group=ctx.depth_parallel_group,
                     overlap_comm=True,
                 )
+                #ax.get_timers().stop("reduce-scatter")
                 overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
 
             if ctx.needs_input_grad[0]:
+                ax.get_timers().start("compute")
                 grad_input = grad_output.matmul(weight)
+                ax.get_timers().stop("compute")
+            ax.get_timers().stop("backward-async")
             return grad_input, grad_weight, None, None, None, None, None, None, None
 
 
@@ -305,6 +321,7 @@ class Linear(torch.nn.Module):
         x,
         cache_weights_in_all_gather=False,
     ):
+        ax.get_timers().start("forward-linear")
         original_shape_x = x.shape
         x = x.reshape(-1, x.shape[-1])
         weight = self.weight
@@ -345,11 +362,13 @@ class Linear(torch.nn.Module):
         x = x.reshape(*original_shape_x[:-1], x.shape[-1])
 
         if self.bias is None:
+            ax.get_timers().stop("forward-linear")
             return x
         else:
             bias = self.bias
             if not self.expert_mode:
                 bias = Gather.apply(bias, self.outer_group)
+            ax.get_timers().stop("forward-linear")
             if self.skip_bias_add:
                 return x, bias
             else:
