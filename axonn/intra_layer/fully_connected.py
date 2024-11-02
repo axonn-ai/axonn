@@ -184,14 +184,12 @@ class AsyncLinear(Function):
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
                 ax.get_timers().stop("compute")
-                #ax.get_timers().start("reduce-scatter")
                 grad_weight = _reduce_scatter(
                     grad_weight,
                     dim=0,
                     process_group=ctx.depth_parallel_group,
                     overlap_comm=True,
                 )
-                #ax.get_timers().stop("reduce-scatter")
                 overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
 
