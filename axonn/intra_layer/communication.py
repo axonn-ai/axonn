@@ -8,6 +8,7 @@ import torch
 import axonn.intra_layer.overlap_communication as overlap_communication
 from axonn import axonn as ax
 
+
 def _all_reduce(input_, process_group=None, overlap_comm=False):
     ax.get_timers().start("all-reduce")
     input_ = input_.contiguous()
@@ -32,6 +33,7 @@ def _drop(input_, dim, process_group=None):
     chunk_size = input_.shape[dim] // total_chunks
     ax.get_timers().stop("drop")
     return torch.narrow(input_, dim, this_chunk * chunk_size, chunk_size)
+
 
 def _gather(input_, dim, process_group=None, cache=False):
     """Gather tensors and concatenate them along a dimension"""
@@ -68,7 +70,7 @@ def _gather(input_, dim, process_group=None, cache=False):
 
 def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     assert dim == 0, "reduce scatter only implemented for dim=0"
-    
+
     if dist.get_world_size(process_group) == 1:
         return input_
     ax.get_timers().start("reduce-scatter")
@@ -89,7 +91,7 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         handle = torch.distributed._reduce_scatter_base(
             output, input_, group=process_group, async_op=overlap_comm
         )
-    
+
     ax.get_timers().stop("reduce-scatter-dist")
     if overlap_comm:
         overlap_communication.register_handle(handle)
