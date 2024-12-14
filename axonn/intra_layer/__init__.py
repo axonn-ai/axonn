@@ -152,13 +152,16 @@ def sync_gradients(
     if vectorize:
         raise NotImplementedError
     else:
+        ax.get_timers().start("weights")
         for grad in grads_to_sync["tensor_parallel_weights"]:
             # weights are already reduced over the depth parallel groups
             # so we only need the reduction over the data parallel group
             dist.all_reduce(grad, group=data_parallel_group)
             if mean:
                 grad.div_(torch.distributed.get_world_size())
+        ax.get_timers().stop("weights")
 
+        ax.get_timers().start("bias")
         for grad in grads_to_sync["tensor_parallel_biases"]:
             # biases need to be reduced over both the data parallel
             # and depth parallel groups
@@ -166,12 +169,17 @@ def sync_gradients(
             dist.all_reduce(grad, group=depth_parallel_group)
             if mean:
                 grad.div_(torch.distributed.get_world_size())
+        ax.get_timers().stop("bias")
 
-        ax.get_timers().start("AR-others-world")
+        ax.get_timers().start("others")
         for grad in grads_to_sync["others"]:
             # all other weights are purely data parallel
             dist.all_reduce(grad)
             if mean:
                 grad.div_(torch.distributed.get_world_size())
-        ax.get_timers().stop("AR-others-world")
+        ax.get_timers().stop("others")
+    #if mean:
+    #    torch._foreach_div_(grads_to_sync["others"] + grads_to_sync["tensor_parallel_weights"] + grads_to_sync["tensor_parallel_biases"], 
+    #        torch.distributed.get_world_size()    
+    #    )
     ax.get_timers().stop("sync-gradients-non-expert")

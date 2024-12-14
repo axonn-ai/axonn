@@ -69,6 +69,15 @@ def extract_local_params_from_full_params(
     params = Drop.apply(params.reshape(-1), depth_group)  # create 1D view
     return params
 
+@torch.no_grad()
+def gather_full_params_from_local_params(
+     params, out_features_group, in_features_group, depth_group, local_shape
+):
+    params = Gather.apply(params, depth_group).reshape(local_shape)
+    params = Gather.apply(params, in_features_group, -1)
+    params = Gather.apply(params, out_features_group, 0)
+    return params
+
 
 @torch.no_grad()
 def initialize_params(
@@ -299,6 +308,8 @@ class Linear(torch.nn.Module):
         self.skip_bias_add = skip_bias_add
         self._old_load_from_state_dict = self._load_from_state_dict
         self._load_from_state_dict = self._modified_load_from_state_dict
+        self._old_state_dict = self.state_dict
+        self.state_dict = self._modified_state_dict
 
     def forward(
         self,
@@ -406,3 +417,27 @@ class Linear(torch.nn.Module):
                     ), "This is neither a full checkpoint nor a sharded checkpoint"
 
         self._old_load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+    @torch.no_grad()
+    def _modified_state_dict(self, *args, **kwargs):
+        local_state_dict = self._old_state_dict(*args, **kwargs)
+        weight_key, bias_key = None, None    
+        for key in local_state_dict:
+            if "weight" in key:
+                weight_key = key
+            if "bias" in key:
+                bias_key = key
+        local_weight = local_state_dict[weight_key]
+        global_weight = gather_full_params_from_local_params(
+            local_weight, self.outer_group, self.inner_group, self.depth_group, (self.local_out_features, self.local_in_features)
+        )
+        if bias_key is not None:
+            local_bias = local_state_dict[bias_key]
+            global_bias = Gather.apply(local_bias, self.outer_group) 
+
+        if torch.distributed.get_rank() == 0:
+            local_state_dict[weight_key] = global_weight.cpu()
+            if bias_key is not None:
+                local_state_dict[bias_key] = global_bias
+        
+        return local_state_dict

@@ -168,8 +168,8 @@ def _gather_channels_scatter_batch(input_, rank_local_batch_sizes, process_group
         )
 
     torch.distributed.all_to_all(recv_tensors, send_tensors, group=process_group)
-    ax.get_timers().stop("gather-channels-scatter-batch")
     ax.get_timers().stop("alltoallv")
+    ax.get_timers().stop("gather-channels-scatter-batch")
     return torch.cat(recv_tensors, dim=-1)
 
 

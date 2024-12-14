@@ -86,7 +86,7 @@ class patched_embedding:
 @contextmanager
 def auto_parallelize():
     nn.Linear = patched_linear
-    #    nn.Embedding = patched_embedding
+    nn.Embedding = patched_embedding
     try:
         yield None
     finally:
