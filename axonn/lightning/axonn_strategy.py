@@ -75,6 +75,7 @@ class AxonnStrategy(ParallelStrategy):
             Union[Type[Module], List[Type[Module]]]
         ] = None,
         activation_checkpointing_policy: Optional["_POLICY"] = None,  # noqa: F821
+        expert_mode=False
     ) -> None:
         super().__init__(
             accelerator=accelerator,
@@ -98,6 +99,8 @@ class AxonnStrategy(ParallelStrategy):
             activation_checkpointing, activation_checkpointing_policy
         )
 
+        self.expert_mode = expert_mode
+
     @property
     @override
     def root_device(self) -> torch.device:
@@ -119,15 +122,17 @@ class AxonnStrategy(ParallelStrategy):
     @property
     @override
     def distributed_sampler_kwargs(self) -> Dict[str, Any]:
-        return {
-            "num_replicas": torch.distributed.get_world_size(),
-            "rank": torch.distributed.get_rank(),
-        }
-        # return {
-        #    "num_replicas": ax.config.G_intra_d * ax.config.G_data,
-        #    "rank": ax.config.G_intra_d * ax.config.data_parallel_rank
-        #    + ax.config.intra_layer_depth_parallel_rank,
-        # }
+        if not self.expert_mode:
+            return {
+                "num_replicas": torch.distributed.get_world_size(),
+                "rank": torch.distributed.get_rank(),
+            }
+        else:
+            return {
+                "num_replicas": ax.config.G_intra_d * ax.config.G_data,
+                "rank": ax.config.G_intra_d * ax.config.data_parallel_rank
+                + ax.config.intra_layer_depth_parallel_rank,
+         }
 
     @property
     def process_group_backend(self) -> Optional[str]:
@@ -253,7 +258,7 @@ class AxonnStrategy(ParallelStrategy):
                     super().backward(tensor, module, *args, **kwargs)
         else:
             super().backward(tensor, module, *args, **kwargs)
-        sync_gradients(module, mean=True)
+        sync_gradients(module, mean=True, expert_mode=self.expert_mode)
 
     @override
     def load_checkpoint(
@@ -302,7 +307,8 @@ class AxonnStrategy(ParallelStrategy):
         error_if_nonfinite: bool = True,
     ) -> Tensor:
         self.precision.unscale_gradients(optimizer)
-        parameters = self.precision.main_params(optimizer)
+        #parameters = self.precision.main_params(optimizer)
+        parameters = module.parameters()
         grad_norm = clip_grad_norm_(
             parameters=parameters,
             max_norm=max_norm,
