@@ -163,6 +163,11 @@ class communication_handle:
             self.depth_intra_layer_parallel_group,
         ) = self.get_intra_layer_groups()
 
+    def destroy_process_groups(self):
+        for groups in self.intra_layer_group_cache.values():
+            for group in groups:
+                torch.distributed.destroy_process_group(group)
+
     def get_intra_layer_groups(
         self, tensor_parallel_dims: Optional[Sequence[int]] = None
     ):

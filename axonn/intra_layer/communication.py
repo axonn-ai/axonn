@@ -68,7 +68,7 @@ def _gather(input_, dim, process_group=None, cache=False):
     return output
 
 
-def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
+def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False, register_handle=True):
     assert dim == 0, "reduce scatter only implemented for dim=0"
 
     if dist.get_world_size(process_group) == 1:
@@ -93,9 +93,11 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
         )
 
     ax.get_timers().stop("reduce-scatter-dist")
-    if overlap_comm:
+    if overlap_comm and register_handle:
         overlap_communication.register_handle(handle)
     ax.get_timers().stop("reduce-scatter")
+    if overlap_comm and not register_handle:
+        return output, handle
     return output
 
 
