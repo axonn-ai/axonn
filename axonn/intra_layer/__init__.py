@@ -5,7 +5,6 @@
 
 from contextlib import contextmanager
 from .fully_connected import Linear  # noqa: F401
-from .moe import MoELinear  # noqa: F401
 from .conv import Conv2d  # noqa: F401
 from .embedding import Embedding  # noqa: F401
 
