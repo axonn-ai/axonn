@@ -25,6 +25,8 @@ class DroplessMoEMLP(nn.Module):
         self.tp_size = tp_size
         
     def forward(self, x):
+        nd_shape = x.shape 
+        x = x.reshape(-1, x.shape[-1])
         permuted_logits, sorted_indices, _, per_expert_token_counts = self.router(x)
         y = self.fc(permuted_logits, per_expert_token_counts)
         y1, y2 = y[..., ::2], y[..., 1::2]
@@ -36,4 +38,5 @@ class DroplessMoEMLP(nn.Module):
                       sorted_indices, 
                       restore_shape=restore_shape, 
                       probs=None)
+        y = y.reshape(*nd_shape[:-1], y.shape[-1])
         return y

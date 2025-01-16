@@ -20,7 +20,7 @@ class SimpleFSDPLinear(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, w, per_expert_token_counts, local_weight_shape, process_group):
         w_gathered = _gather(w, dim=0, process_group=process_group, cache=False).reshape(local_weight_shape)
-        y = backend.gmm(x, w_gathered, per_expert_token_counts, trans_b=True)
+        y = backend.gmm(x.to(torch.bfloat16), w_gathered.to(torch.bfloat16), per_expert_token_counts, trans_b=True).to(x.dtype)
         ctx.local_weight_shape = local_weight_shape 
         ctx.process_group = process_group 
         ctx.save_for_backward(w, x, per_expert_token_counts)
@@ -32,10 +32,10 @@ class SimpleFSDPLinear(torch.autograd.Function):
         w_gathered = _gather(w, dim=0, process_group=ctx.process_group, cache=False).reshape(ctx.local_weight_shape)
         # dw = dout.t() @ x - this can be overlapped with the previous line 
         # after that do a reduce scatter
-        grad_w = backend.gmm(grad_out, x, per_expert_token_counts, trans_a=True, trans_b=False).reshape(-1)
+        grad_w = backend.gmm(grad_out.to(torch.bfloat16), x.to(torch.bfloat16), per_expert_token_counts, trans_a=True, trans_b=False).reshape(-1).to(torch.float32)
         grad_w = _reduce_scatter(grad_w, dim=0, process_group=ctx.process_group)
         # dx = dout @ w
-        grad_x = backend.gmm(grad_out, w_gathered, per_expert_token_counts, trans_b=False)
+        grad_x = backend.gmm(grad_out.to(torch.bfloat16), w_gathered.to(torch.bfloat16), per_expert_token_counts, trans_b=False).to(torch.float32)
         return grad_x, grad_w, None, None, None
 
 class ColumnParallelMoE(nn.Module):
