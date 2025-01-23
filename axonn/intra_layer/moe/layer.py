@@ -2,6 +2,8 @@ import torch.nn as nn
 from .linear import ColumnParallelMoE, RowParallelMoE 
 from .routing import DroplessMoERouting 
 import torch.nn.functional as F
+from .communication import TensorParallelUnpermuteAndScatter
+import torch.distributed as dist
 
 class DroplessMoEMLP(nn.Module):
     def __init__(self, num_experts, hdim, idim, tp_size):
@@ -34,9 +36,12 @@ class DroplessMoEMLP(nn.Module):
         restore_shape = list(x.shape)
         restore_shape[0] *= self.tp_size
         y = self.proj(y, 
-                      per_expert_token_counts, 
-                      sorted_indices, 
-                      restore_shape=restore_shape, 
-                      probs=None)
+                      per_expert_token_counts) 
+        y = TensorParallelUnpermuteAndScatter.apply(
+             y, 
+             sorted_indices, 
+             restore_shape, 
+             self.proj.tensor_parallel_group
+         )
         y = y.reshape(*nd_shape[:-1], y.shape[-1])
         return y

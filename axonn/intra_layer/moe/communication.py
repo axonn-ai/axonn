@@ -13,7 +13,9 @@ def _unpermute_and_drop(input_, permutation_indices, unpermuted_tensor_shape, pr
                                       device=input_.device, 
                                       dtype=input_.dtype)
     
-    unpermuted_input.scatter_add_(0, permutation_indices.unsqueeze(1), input_)
+    unpermuted_input.scatter_add_(0, 
+                                  permutation_indices.unsqueeze(1).expand(-1, unpermuted_tensor_shape[1]).cuda(), 
+                                  input_)
     
     # do a reduce scatter
     unpermuted_tensor_shape = list(unpermuted_tensor_shape) 
