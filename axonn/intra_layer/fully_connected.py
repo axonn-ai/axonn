@@ -26,6 +26,7 @@ from .asym_communication import (
     gather_batch_sizes,
 )
 from typing import Optional, Sequence
+from axonn.uni_dist import all_gather_2D 
 
 
 # Wrapper for custom_fwd to handle different versions of PyTorch
@@ -93,6 +94,17 @@ def default_init_method(weight):
     return torch.nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
 
 
+def uni_dist_all_gather(weight, group):
+    output_shape = weight.shape[0] * group.get_world_size(0) * group.get_world_size(1)
+    all_gathered_weight = torch.empty(
+        output_shape, dtype=weight.dtype, device=weight.device
+    )
+    all_gather_2D(all_gathered_weight, weight, group = group)
+    return all_gathered_weight
+
+def get_autocast_dtype():
+    return torch.get_autocast_dtype("cuda") 
+
 class AsyncLinear(Function):
     @staticmethod
     @version_aware_custom_fwd
@@ -105,17 +117,22 @@ class AsyncLinear(Function):
         depth_parallel_group,
         local_weight_shape,
         cache_weights,
+        use_uni_dist,
     ):
         ax.get_timers().start("forward-async")
         original_weight = weight
-        weight = _gather(
-            weight, dim=0, process_group=depth_parallel_group, cache=cache_weights
-        )
+        if use_uni_dist:
+            weight = uni_dist_all_gather(weight.to(get_autocast_dtype()), ax.comm_handle.uni_dist_group)
+        else:
+            weight = _gather(
+                weight.to(get_autocast_dtype()), dim=0, process_group=depth_parallel_group, cache=cache_weights
+            )
         weight = weight.reshape(local_weight_shape)
         ctx.save_for_backward(input_, original_weight)
         ctx.backward_all_reduce_group = backward_all_reduce_group
         ctx.depth_parallel_group = depth_parallel_group
         ctx.shape = local_weight_shape
+        ctx.use_uni_dist = use_uni_dist
         ax.get_timers().start("compute")
         output = input_.matmul(weight.t())
         ax.get_timers().stop("compute")
@@ -128,9 +145,12 @@ class AsyncLinear(Function):
     def backward(ctx, grad_output):
         ax.get_timers().start("backward-async")
         input_, original_weight = ctx.saved_tensors
-        weight = _gather(
-            original_weight, dim=0, process_group=ctx.depth_parallel_group, cache=False
-        )
+        if ctx.use_uni_dist:
+            weight = uni_dist_all_gather(original_weight.to(get_autocast_dtype()), ax.comm_handle.uni_dist_group)
+        else:
+            weight = _gather(
+                original_weight.to(get_autocast_dtype()), dim=0, process_group=ctx.depth_parallel_group, cache=False
+            )
         weight = weight.reshape(ctx.shape)
         handle = None
         overlap_reduce_scatter = overlap_communication.OVERLAP_REDUCE_SCATTER
@@ -212,6 +232,7 @@ class Linear(torch.nn.Module):
         skip_bias_add=False,
         init_method=None,
         expert_mode=False,
+        use_uni_dist=None,
         tensor_parallel_dims: Optional[Sequence[int]] = None,
         **kwargs,
     ):
@@ -239,6 +260,8 @@ class Linear(torch.nn.Module):
         self.inner_group_size = dist.get_world_size(self.inner_group)
         self.outer_group_size = dist.get_world_size(self.outer_group)
         self.depth_group_size = dist.get_world_size(self.depth_group)
+
+        self.use_uni_dist = ax.config.use_uni_dist if use_uni_dist is None else use_uni_dist
 
         # these are the in and out features of the full global weight matrix
         self.in_features = in_features
@@ -346,6 +369,7 @@ class Linear(torch.nn.Module):
             self.depth_group,
             (self.local_out_features, self.local_in_features),
             cache_weights_in_all_gather,
+            self.use_uni_dist
         )
         if not self.expert_mode and (self.inner_group_size * self.outer_group_size > 1):
             # extra communication to transition from 4D hybrid parallelism

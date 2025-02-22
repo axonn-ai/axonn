@@ -32,6 +32,7 @@ class communication_handle:
         G_intra_c=1,
         G_intra_d=1,
         gpus_per_node=None,
+        use_uni_dist=False
     ):
         """Constructor for the communication handle
 
@@ -43,6 +44,7 @@ class communication_handle:
             G_intra_r (int): number of GPUs in the row intra-layer parallel dimension
             G_intra_c (int): number of GPUs in the column intra-layer parallel dimension
             G_intra_d (int): number of GPUs in the depth intra-layer parallel dimension
+            use_uni_dist (bool): use the unified dist communication library
         """
         if not torch.distributed.is_initialized():
             assert MPI4PY, "either install mpi4py and launch via mpirun/srun"
@@ -54,6 +56,9 @@ class communication_handle:
         else:
             self.world_rank = torch.distributed.get_rank()
             self.world_size = torch.distributed.get_world_size()
+
+        if use_uni_dist:
+            assert G_intra_c == G_intra_r == 1, "only intra_d allowed"
 
         G_intra = G_intra_r * G_intra_c * G_intra_d
         assert (
@@ -68,10 +73,10 @@ class communication_handle:
         self.G_intra_d = G_intra_d
 
         # infer gpus per node if not provided
-        self.gpus_per_node = (
-            gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
-        )
-        self.local_rank = self.world_rank % self.gpus_per_node
+        # self.gpus_per_node = (
+        #     gpus_per_node if gpus_per_node is not None else torch.cuda.device_count()
+        # )
+        self.local_rank = self.world_rank % (torch.cuda.device_count())
         torch.cuda.set_device(self.local_rank)
         self.intra_layer_parallel_rank = self.world_rank % G_intra
         self.intra_layer_column_parallel_rank = (
@@ -162,6 +167,18 @@ class communication_handle:
             self.outer_intra_layer_parallel_group,
             self.depth_intra_layer_parallel_group,
         ) = self.get_intra_layer_groups()
+
+        if use_uni_dist:
+            from axonn.uni_dist import ProcessGroups
+            assert MPI4PY, "uni_dist needs cuda aware mpi"
+            if not MPI.Is_initialized():
+                MPI.Init()
+            assert G_intra_d % gpus_per_node == 0
+            self.uni_dist_group = ProcessGroups(gpus_per_node, 
+                                                                  G_intra_d // gpus_per_node,
+                                                                  "nccl",
+                                                                  "mpi")
+
 
     def get_intra_layer_groups(
         self, tensor_parallel_dims: Optional[Sequence[int]] = None

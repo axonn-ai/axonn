@@ -26,6 +26,7 @@ def init(
     G_intra_d: int = 1,
     gpus_per_node: Optional[int] = None,
     enable_internal_timers: bool = False,
+    use_uni_dist: bool = False
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -42,11 +43,12 @@ def init(
         enable_internal_timers (bool): enable AxoNN's internal timers. This will give
         you information about time spent in synchronous communication regions
         and matrix multiplications.
+        use_unit_dist (bool): Use the unified distributed communication library
 
     """
     global comm_handle, is_initialized, enable_timers, timers
     comm_handle = communication_handle(
-        G_inter, G_data, G_intra_r, G_intra_c, G_intra_d, gpus_per_node=gpus_per_node
+        G_inter, G_data, G_intra_r, G_intra_c, G_intra_d, gpus_per_node=gpus_per_node, use_uni_dist=use_uni_dist
     )
     config.G_inter = G_inter
     config.G_data = G_data
@@ -62,6 +64,7 @@ def init(
     config.intra_layer_column_parallel_rank = (
         comm_handle.intra_layer_column_parallel_rank
     )
+    config.use_uni_dist = use_uni_dist
     is_initialized = True
     enable_timers = enable_internal_timers
     timers = Timers()
