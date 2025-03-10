@@ -26,7 +26,9 @@ def init(
     G_intra_d: int = 1,
     gpus_per_node: Optional[int] = None,
     enable_internal_timers: bool = False,
-    use_uni_dist: bool = False
+    use_uni_dist: bool = False,
+    low_latency_all_gathers: bool = False,
+    low_latency_reduce_scatters: bool = False,
 ) -> None:
     """
     Initialize AxoNN's 2D parallelism with G_inter-way inter-layer
@@ -65,6 +67,8 @@ def init(
         comm_handle.intra_layer_column_parallel_rank
     )
     config.use_uni_dist = use_uni_dist
+    config.low_latency_all_gathers = low_latency_all_gathers
+    config.low_latency_reduce_scatters = low_latency_reduce_scatters
     is_initialized = True
     enable_timers = enable_internal_timers
     timers = Timers()

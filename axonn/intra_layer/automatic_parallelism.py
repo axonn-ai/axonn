@@ -43,7 +43,8 @@ class patched_linear:
     ):
         if is_parallelizable_linear(in_features, out_features):
             parallel_layer = Linear(
-                in_features, out_features, bias=bias, *args, **kwargs
+                in_features, out_features, bias=bias, *args, 
+                use_uni_dist=ax.config.use_uni_dist, **kwargs
             )
             if device is not None:
                 parallel_layer = parallel_layer.to(device)

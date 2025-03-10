@@ -26,7 +26,7 @@ from .asym_communication import (
     gather_batch_sizes,
 )
 from typing import Optional, Sequence
-from axonn.uni_dist import all_gather_2D 
+from axonn.uni_dist import all_gather_2D, reduce_scatter_2D
 
 
 # Wrapper for custom_fwd to handle different versions of PyTorch
@@ -99,8 +99,23 @@ def uni_dist_all_gather(weight, group):
     all_gathered_weight = torch.empty(
         output_shape, dtype=weight.dtype, device=weight.device
     )
-    all_gather_2D(all_gathered_weight, weight, group = group)
+    all_gather_2D(all_gathered_weight, 
+                  weight, 
+                  group=group, 
+                  use_recursive_doubling_in_mpi=ax.config.low_latency_all_gathers)
     return all_gathered_weight
+
+def uni_dist_reduce_scatter(grad, group):
+    output_shape = grad.shape[0] // (group.get_world_size(0) * group.get_world_size(1))
+    reduce_scattered_grad = torch.empty(
+        output_shape, dtype=grad.dtype, device=grad.device
+    )
+    reduce_scatter_2D(reduce_scattered_grad, 
+                      grad, 
+                      group=group,
+                      use_recursive_halving_in_mpi=ax.config.low_latency_reduce_scatters)
+    return reduce_scattered_grad
+
 
 def get_autocast_dtype():
     return torch.get_autocast_dtype("cuda") 
@@ -178,13 +193,16 @@ class AsyncLinear(Function):
                 )
                 ax.get_timers().stop("compute")
 
-                grad_weight = grad_weight.reshape(-1)
-                grad_weight = _reduce_scatter(
-                    grad_weight,
-                    dim=0,
-                    process_group=ctx.depth_parallel_group,
-                    overlap_comm=overlap_reduce_scatter,
-                )
+                grad_weight = grad_weight.reshape(-1).to(torch.float32)
+                if ctx.use_uni_dist:
+                    grad_weight = uni_dist_reduce_scatter(grad_weight, ax.comm_handle.uni_dist_group)
+                else:
+                    grad_weight = _reduce_scatter(
+                        grad_weight,
+                        dim=0,
+                        process_group=ctx.depth_parallel_group,
+                        overlap_comm=overlap_reduce_scatter,
+                    )
 
             if handle and overlap_all_reduce:
                 handle.wait()
@@ -204,12 +222,15 @@ class AsyncLinear(Function):
                     .mm(input_.view(-1, input_.shape[-1]))
                 ).reshape(-1)
                 ax.get_timers().stop("compute")
-                grad_weight = _reduce_scatter(
-                    grad_weight,
-                    dim=0,
-                    process_group=ctx.depth_parallel_group,
-                    overlap_comm=True,
-                )
+                if ctx.use_uni_dist:
+                    grad_weight = uni_dist_reduce_scatter(grad_weight, ax.comm_handle.uni_dist_group)
+                else:
+                    grad_weight = _reduce_scatter(
+                        grad_weight,
+                        dim=0,
+                        process_group=ctx.depth_parallel_group,
+                        overlap_comm=True,
+                    )
                 overlap_communication.accumulate_later(original_weight, grad_weight)
                 grad_weight = None  # weight gradients are not ready yet
 
