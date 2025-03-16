@@ -175,6 +175,9 @@ class communication_handle:
             )
         else:
             G_intra_r, G_intra_c, G_intra_d = tensor_parallel_dims
+            G_intra = G_intra_r * G_intra_c * G_intra_d
+            assert self.world_size % G_intra == 0
+            G_data = self.world_size // G_intra
         # first check if these communicators have already
         # been created
         group_key = (G_intra_r, G_intra_c, G_intra_d)
