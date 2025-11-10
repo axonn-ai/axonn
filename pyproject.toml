@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["axonn"]
+include = ["axonn", "axonn/intra_layer", "axonn/lightning", "axonn/models"]
 exclude = ["axonn/tests", "external/", "**__pycache__"]
 
 
