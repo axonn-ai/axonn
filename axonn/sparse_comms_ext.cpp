@@ -1,5 +1,7 @@
 // Standalone Python extension for sparse NCCL collectives.
 // Obtains ncclComm_t from PyTorch's process group via pg._comm_ptr().
+// Obtains the internal NCCL stream via get_nccl_stream_ptr(), using the
+// #define private public trick to read ncclStreams_ without patching PyTorch.
 //
 // Environment variables (read once at first call):
 //   USE_SPARSE_RS=1  — use ncclReduceScatterSparse, else ncclReduceScatter
@@ -11,6 +13,19 @@
 #include <c10/cuda/CUDAStream.h>
 #include <nccl.h>
 #include <cstdlib>
+
+// ---------------------------------------------------------------------------
+// Access ncclStreams_ from ProcessGroupNCCL without patching PyTorch.
+// #define private public makes all private members accessible; memory layout
+// is unaffected by access specifiers so this is safe at runtime.
+// USE_C10D_NCCL must be defined to unlock the #ifdef guard in the header.
+// ---------------------------------------------------------------------------
+#define USE_C10D_NCCL
+#define private public
+#define protected public
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#undef protected
+#undef private
 
 namespace py = pybind11;
 
@@ -69,23 +84,41 @@ static void checkNccl(ncclResult_t r, const char* op) {
 }
 
 // ---------------------------------------------------------------------------
-// Collectives
+// Stream accessor
+//
+// Returns the raw cudaStream_t (as int64_t) that ProcessGroupNCCL uses for
+// async collectives on the given device — the same stream internal to torch.
+// Returns 0 if the communicator has not been warmed up yet.
 // ---------------------------------------------------------------------------
 
-// reduce_scatter: sparse or dense depending on USE_SPARSE_RS
-// input:  [nranks * recvcount] elements
-// output: [recvcount] elements  (this rank's slice after reduce-scatter)
+int64_t get_nccl_stream_ptr(py::object backend_obj, int device_index) {
+  auto* pg = backend_obj.cast<c10d::ProcessGroupNCCL*>();
+  std::string key = std::to_string(device_index);
+  auto it = pg->ncclStreams_.find(key);
+  if (it == pg->ncclStreams_.end()) return 0;
+  return reinterpret_cast<int64_t>(it->second.stream());
+}
+
+// ---------------------------------------------------------------------------
+// Collectives
+//
+// stream_ptr is a cudaStream_t cast to int64_t — the caller selects the
+// appropriate stream (torch's internal NCCL stream for async, current stream
+// for sync) and passes it here, matching NCCL's own calling convention.
+// ---------------------------------------------------------------------------
+
 void reduce_scatter_sparse(
     const at::Tensor& input,
     at::Tensor& output,
-    int64_t comm_ptr) {
+    int64_t comm_ptr,
+    int64_t stream_ptr) {
   init_flags();
   TORCH_CHECK(input.is_cuda() && output.is_cuda(), "Tensors must be on CUDA");
   TORCH_CHECK(input.is_contiguous() && output.is_contiguous(), "Tensors must be contiguous");
   TORCH_CHECK(input.scalar_type() == output.scalar_type(), "dtype mismatch");
 
   auto comm   = toComm(comm_ptr);
-  auto stream = at::cuda::getCurrentCUDAStream(input.device().index()).stream();
+  auto stream = reinterpret_cast<cudaStream_t>(stream_ptr);
   auto dtype  = getNcclDataType(input.scalar_type());
   auto count  = static_cast<size_t>(output.numel());
 
@@ -104,20 +137,18 @@ void reduce_scatter_sparse(
   }
 }
 
-// all_gather: sparse or dense depending on USE_SPARSE_AG
-// input:  [sendcount] elements  (this rank's chunk)
-// output: [nranks * sendcount] elements
 void all_gather_sparse(
     const at::Tensor& input,
     at::Tensor& output,
-    int64_t comm_ptr) {
+    int64_t comm_ptr,
+    int64_t stream_ptr) {
   init_flags();
   TORCH_CHECK(input.is_cuda() && output.is_cuda(), "Tensors must be on CUDA");
   TORCH_CHECK(input.is_contiguous() && output.is_contiguous(), "Tensors must be contiguous");
   TORCH_CHECK(input.scalar_type() == output.scalar_type(), "dtype mismatch");
 
   auto comm   = toComm(comm_ptr);
-  auto stream = at::cuda::getCurrentCUDAStream(input.device().index()).stream();
+  auto stream = reinterpret_cast<cudaStream_t>(stream_ptr);
   auto dtype  = getNcclDataType(input.scalar_type());
   auto count  = static_cast<size_t>(input.numel());
 
@@ -136,12 +167,11 @@ void all_gather_sparse(
   }
 }
 
-// all_reduce: sparse or dense depending on USE_SPARSE_AR
-// input/output: [count] elements (in-place OR out-of-place)
 void all_reduce_sparse(
     const at::Tensor& input,
     at::Tensor& output,
-    int64_t comm_ptr) {
+    int64_t comm_ptr,
+    int64_t stream_ptr) {
   init_flags();
   TORCH_CHECK(input.is_cuda() && output.is_cuda(), "Tensors must be on CUDA");
   TORCH_CHECK(input.is_contiguous() && output.is_contiguous(), "Tensors must be contiguous");
@@ -149,7 +179,7 @@ void all_reduce_sparse(
   TORCH_CHECK(input.numel() == output.numel(), "size mismatch");
 
   auto comm   = toComm(comm_ptr);
-  auto stream = at::cuda::getCurrentCUDAStream(input.device().index()).stream();
+  auto stream = reinterpret_cast<cudaStream_t>(stream_ptr);
   auto dtype  = getNcclDataType(input.scalar_type());
   auto count  = static_cast<size_t>(input.numel());
 
@@ -175,16 +205,28 @@ void all_reduce_sparse(
 PYBIND11_MODULE(sparse_comms_ext, m) {
   m.doc() = "Sparse NCCL collectives via PyTorch comm_ptr";
 
+  m.def("get_nccl_stream_ptr", &get_nccl_stream_ptr,
+    R"(
+Return the raw cudaStream_t (as int64_t) that ProcessGroupNCCL uses for
+async collectives on device_index.  Returns 0 if not yet initialized.
+
+Args:
+    backend_obj: the ProcessGroupNCCL backend (pg._get_backend(device))
+    device_index: int, CUDA device index
+)",
+    py::arg("backend_obj"), py::arg("device_index"));
+
   m.def("reduce_scatter_sparse", &reduce_scatter_sparse,
     R"(
 Reduce-scatter: sparse (ncclReduceScatterSparse) if USE_SPARSE_RS=1, else dense.
 
 Args:
-    input:    CUDA tensor, shape [nranks * recvcount]
-    output:   CUDA tensor, shape [recvcount] — this rank's slice
-    comm_ptr: int64 from pg._comm_ptr()
+    input:      CUDA tensor, shape [nranks * recvcount]
+    output:     CUDA tensor, shape [recvcount]
+    comm_ptr:   int64 from pg._comm_ptr()
+    stream_ptr: int64 cudaStream_t
 )",
-    py::arg("input"), py::arg("output"), py::arg("comm_ptr"),
+    py::arg("input"), py::arg("output"), py::arg("comm_ptr"), py::arg("stream_ptr"),
     py::call_guard<py::gil_scoped_release>());
 
   m.def("all_gather_sparse", &all_gather_sparse,
@@ -192,11 +234,12 @@ Args:
 All-gather: sparse (ncclAllGatherSparse) if USE_SPARSE_AG=1, else dense.
 
 Args:
-    input:    CUDA tensor, shape [sendcount] — this rank's chunk
-    output:   CUDA tensor, shape [nranks * sendcount]
-    comm_ptr: int64 from pg._comm_ptr()
+    input:      CUDA tensor, shape [sendcount]
+    output:     CUDA tensor, shape [nranks * sendcount]
+    comm_ptr:   int64 from pg._comm_ptr()
+    stream_ptr: int64 cudaStream_t
 )",
-    py::arg("input"), py::arg("output"), py::arg("comm_ptr"),
+    py::arg("input"), py::arg("output"), py::arg("comm_ptr"), py::arg("stream_ptr"),
     py::call_guard<py::gil_scoped_release>());
 
   m.def("all_reduce_sparse", &all_reduce_sparse,
@@ -204,11 +247,11 @@ Args:
 All-reduce: sparse (ncclAllReduceSparse) if USE_SPARSE_AR=1, else dense.
 
 Args:
-    input:    CUDA tensor, shape [count]
-    output:   CUDA tensor, shape [count]  (may alias input for in-place)
-    comm_ptr: int64 from pg._comm_ptr()
+    input:      CUDA tensor, shape [count]
+    output:     CUDA tensor, shape [count]  (may alias input for in-place)
+    comm_ptr:   int64 from pg._comm_ptr()
+    stream_ptr: int64 cudaStream_t
 )",
-    py::arg("input"), py::arg("output"), py::arg("comm_ptr"),
+    py::arg("input"), py::arg("output"), py::arg("comm_ptr"), py::arg("stream_ptr"),
     py::call_guard<py::gil_scoped_release>());
-
 }

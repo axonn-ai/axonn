@@ -36,17 +36,16 @@ class GradientPruner:
         if key in self._error:
             tensor.add_(self._error[key])
 
-        flat_abs = tensor.abs().flatten()
-        n = flat_abs.numel()
+        n = tensor.numel()
 
         if self.sample_pct < 100.0:
             n_sample = max(1, int(n * self.sample_pct / 100.0))
             idx = torch.randint(0, n, (n_sample,), device=tensor.device)
             k = max(1, int(n_sample * self.sparsity))
-            threshold = torch.kthvalue(flat_abs[idx], k)[0]
+            threshold = torch.kthvalue(tensor.flatten()[idx].abs(), k)[0]
         else:
             k = max(1, int(n * self.sparsity))
-            threshold = torch.kthvalue(flat_abs, k)[0]
+            threshold = torch.kthvalue(tensor.abs().flatten(), k)[0]
 
         mask = tensor.abs() > threshold
 
