@@ -1,6 +1,7 @@
 import torch.distributed as dist
 import torch
 import axonn
+from axonn.sparse_comms import reduce_scatter_sparse
 
 
 def _all_reduce(input_, process_group=None, overlap_comm=False):
@@ -71,22 +72,15 @@ def _reduce_scatter(input_, dim, process_group=None, overlap_comm=False):
     assert input_.shape[dim] % total_chunks == 0
     tensor_shape = list(input_.shape)
     tensor_shape[dim] //= total_chunks
-    
+
     from axonn.intra_layer import REDUCE_SCATTER_DTYPE
-    
+
     output = torch.empty(
         tensor_shape, dtype=REDUCE_SCATTER_DTYPE, device=torch.cuda.current_device()
     )
-
-    if hasattr(torch.distributed, "reduce_scatter_tensor"):
-        handle = torch.distributed.reduce_scatter_tensor(
-            output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
-        )
-    else:
-        handle = torch.distributed._reduce_scatter_base(
-            output, input_.to(REDUCE_SCATTER_DTYPE), group=process_group, async_op=overlap_comm
-        )
-
+    handle = reduce_scatter_sparse(
+        input_.to(REDUCE_SCATTER_DTYPE), output, group=process_group, async_op=overlap_comm
+    )
     if overlap_comm:
         axonn.intra_layer.register_handle(handle)
     return output

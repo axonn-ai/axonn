@@ -1,3 +1,4 @@
+import os
 import torch.distributed as dist
 import torch
 from torch.autograd import Function
@@ -16,6 +17,22 @@ from .communication import (
 from .tuned_matmul import tuned_matmul
 
 TUNE=True
+
+# Lazy-initialized RS gradient pruner (None = disabled, GradientPruner = enabled)
+_rs_pruner = "uninitialized"
+
+def _get_rs_pruner():
+    global _rs_pruner
+    if _rs_pruner != "uninitialized":
+        return _rs_pruner
+    if os.environ.get("AXONN_PRUNE_RS", "0") == "1":
+        from axonn.gradient_pruner import GradientPruner
+        sparsity = float(os.environ.get("AXONN_PRUNE_SPARSITY", "0.9"))
+        sample_pct = float(os.environ.get("AXONN_PRUNE_SAMPLE_PCT", "100.0"))
+        _rs_pruner = GradientPruner(sparsity, sample_pct)
+    else:
+        _rs_pruner = None
+    return _rs_pruner
 
 def divide(a, b):
     assert a % b == 0
@@ -161,6 +178,9 @@ class AsyncLinear(Function):
                     timers.stop(f"BW PASS - W - {mnk}")
 
             grad_weight = grad_weight.reshape(-1)
+            pruner = _get_rs_pruner()
+            if pruner is not None:
+                pruner.prune(grad_weight, key=original_weight.data_ptr())
             grad_weight = _reduce_scatter(
                 grad_weight,
                 dim=0,
@@ -188,10 +208,13 @@ class AsyncLinear(Function):
                 ).reshape(-1)
                 #else:
                 #    grad_weight = tuned_matmul(grad_output.reshape(-1, grad_output.shape[-1]).t(),
-                #                               input_.view(-1, input_.shape[-1]), 
+                #                               input_.view(-1, input_.shape[-1]),
                 #                               signature=f"BW PASS - W - {mnk}").reshape(-1)
                 if ENABLE_TIMERS:
                     timers.stop(f"BW PASS - W - {mnk}")
+                pruner = _get_rs_pruner()
+                if pruner is not None:
+                    pruner.prune(grad_weight, key=original_weight.data_ptr())
                 grad_weight = _reduce_scatter(
                     grad_weight,
                     dim=0,
