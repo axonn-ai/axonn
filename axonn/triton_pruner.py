@@ -1,4 +1,5 @@
 """Triton-based GradientPruner implementation."""
+import os
 
 import torch
 import triton
@@ -9,6 +10,15 @@ import triton.language as tl
 # =============================================================================
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": 512}),
+        triton.Config({"BLOCK_SIZE": 1024}),
+        triton.Config({"BLOCK_SIZE": 2048}),
+        triton.Config({"BLOCK_SIZE": 4096}),
+    ],
+    key=["n_elements"],
+)
 @triton.jit
 def prune_kernel(
     input_ptr,
@@ -18,6 +28,7 @@ def prune_kernel(
     n_elements,
     treshold,
     sparsity,
+    keep_error,
     BLOCK_SIZE: tl.constexpr,
 ):
     """
@@ -54,11 +65,21 @@ def prune_kernel(
 
     tl.store(input_ptr + offsets, zeros, mask=(mask & (~m)))
 
-    tl.store(error_ptr + offsets, x, mask=(mask & m))
+    if keep_error:
+        tl.store(error_ptr + offsets, tl.where(~m, x, zeros), mask=mask)
 
     
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": 512}),
+        triton.Config({"BLOCK_SIZE": 1024}),
+        triton.Config({"BLOCK_SIZE": 2048}),
+        triton.Config({"BLOCK_SIZE": 4096}),
+    ],
+    key=["n_elements", "n_sample_ements"],
+)
 @triton.jit
 def sample_kernel(
     input_ptr,
@@ -118,6 +139,9 @@ class TritonGradientPruner:
         self.sample_pct = sample_pct
         self._error: dict = {}
         self._temp_sample: dict = {}
+        self._keep_error: bool = False
+        if os.getenv("AXONN_PRUNE_ERROR_ACCUMULATE", "1") == "1":
+            self._keep_error = True
 
     @torch.no_grad()
     def prune(self, tensor: torch.Tensor, key=0) -> torch.Tensor:
@@ -132,9 +156,8 @@ class TritonGradientPruner:
             Pruned tensor
         """
         # Add error feedback
-        if key in self._error:
+        if key in self._error and self._keep_error:
             tensor.add_(self._error[key])
-        sample_out = None
         n = tensor.numel()
         n_sample_elems = max(1, int(n * self.sample_pct / 100))
         if key in self._temp_sample:
@@ -144,14 +167,16 @@ class TritonGradientPruner:
             self._temp_sample[key] = sample_out
             
 
-        if key in self._error:
-            error_buffer = self._error[key]
+        if self._keep_error:
+            if key in self._error:
+                error_buffer = self._error[key]
+            else:
+                error_buffer = torch.empty_like(tensor)
+                self._error[key] = error_buffer
         else:
-            error_buffer = torch.empty_like(tensor)
-            self._error[key] = error_buffer
+            error_buffer = tensor
 
-        BLOCK_SIZE = 1024
-        grid = (triton.cdiv(n_sample_elems, BLOCK_SIZE),)
+        grid = lambda meta: (triton.cdiv(n_sample_elems, meta["BLOCK_SIZE"]),)
         seed = torch.randint(0, 2**31, (1,)).item()
         sample_kernel[grid](
             tensor,
@@ -159,7 +184,6 @@ class TritonGradientPruner:
             n,
             n_sample_elems,
             seed,
-            BLOCK_SIZE=BLOCK_SIZE,
         )
         
         
@@ -167,8 +191,7 @@ class TritonGradientPruner:
         threshold = torch.kthvalue(sample_out, k)[0]
         
         # Launch Triton kernel (computes threshold internally)
-        BLOCK_SIZE = 1024
-        grid = (triton.cdiv(n, BLOCK_SIZE),)
+        grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
         prune_kernel[grid](
             tensor,
             tensor,
@@ -177,7 +200,7 @@ class TritonGradientPruner:
             n,
             threshold,
             self.sparsity,
-            BLOCK_SIZE=BLOCK_SIZE,
+            self._keep_error,
         )
 
         return tensor
