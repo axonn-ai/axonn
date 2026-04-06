@@ -29,8 +29,11 @@ def prune_kernel(
     treshold,
     sparsity,
     keep_error,
+    fp8_scale,
+    prev_scale_ptr,
     INPUT_DTYPE: tl.constexpr,
     ERROR_DTYPE: tl.constexpr,
+    BITCAST_ERROR: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
     """
@@ -42,13 +45,18 @@ def prune_kernel(
         error_ptr: Pointer to error buffer (for feedback)
         mask_ptr: Pointer to mask tensor (optional, for debugging)
         n_elements: Total number of elements
+        treshold: Pointer to scalar pruning threshold; also the fp8 store scale when fp8_scale=True
         sparsity: Fraction of elements to prune (0.0 to 1.0)
         keep_error: Whether to write pruned values into error buffer
-        INPUT_DTYPE: dtype of input tensor (tl.constexpr), used to cast error on load
-        ERROR_DTYPE: dtype to use when storing to error_ptr (tl.constexpr)
+        fp8_scale: Scale error by 1/threshold before storing, unscale by prev_scale on load
+        prev_scale_ptr: Pointer to float32 scalar — threshold used when the stored error was written
+        INPUT_DTYPE: dtype of input tensor (tl.constexpr)
+        ERROR_DTYPE: tl dtype of the error buffer values
+        BITCAST_ERROR: True when error is stored as int8 and must be bitcast to ERROR_DTYPE on load/store
         BLOCK_SIZE: Number of elements per block (tl.constexpr)
     """
-    pid = tl.program_id(axis=0)
+    ERROR_DECAY: tl.constexpr = tl.constexpr(0.9)
+    pid = tl.program_id(axis=0).to(tl.int64)
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements
@@ -57,7 +65,13 @@ def prune_kernel(
     x = tl.load(input_ptr + offsets, mask=mask)
 
     if keep_error:
-        e = tl.load(error_ptr + offsets, mask=mask).to(INPUT_DTYPE)
+        if BITCAST_ERROR:
+            e = tl.load(error_ptr + offsets, mask=mask).to(ERROR_DTYPE, bitcast=True).to(INPUT_DTYPE)
+        else:
+            e = tl.load(error_ptr + offsets, mask=mask).to(INPUT_DTYPE)
+        if fp8_scale:
+            prev_scale = tl.load(prev_scale_ptr).to(INPUT_DTYPE)
+            e = e * prev_scale
         x = x + e
 
     a = tl.abs(x)
@@ -69,7 +83,13 @@ def prune_kernel(
     tl.store(input_ptr + offsets, tl.where(m, x, zeros), mask=mask)
 
     if keep_error:
-        tl.store(error_ptr + offsets, tl.where(~m, x, zeros).to(ERROR_DTYPE), mask=mask)
+        new_e = tl.where(~m, x * ERROR_DECAY, zeros)
+        if fp8_scale:
+            new_e = new_e / th
+        if BITCAST_ERROR:
+            tl.store(error_ptr + offsets, new_e.to(ERROR_DTYPE).to(tl.int8, bitcast=True), mask=mask)
+        else:
+            tl.store(error_ptr + offsets, new_e.to(ERROR_DTYPE), mask=mask)
 
 
 @triton.autotune(
@@ -84,10 +104,17 @@ def prune_kernel(
 @triton.jit
 def sample_kernel(
     input_ptr,
+    err_ptr,
     sample_out_ptr,
     n_elements,
     n_sample_ements,
     seed,
+    keep_error,
+    fp8_scale,
+    prev_scale_ptr,
+    INPUT_DTYPE: tl.constexpr,
+    ERROR_DTYPE: tl.constexpr,
+    BITCAST_ERROR: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
     """
@@ -99,15 +126,31 @@ def sample_kernel(
         n_elements: Total number of elements in the input
         n_sample_ements: Number of elements to sample
         seed: Random seed for sampling
+        fp8_scale: Unscale error by prev_scale before use (matches prune_kernel store convention)
+        prev_scale_ptr: Pointer to float32 scalar — threshold used when the stored error was written
+        ERROR_DTYPE: tl dtype of the error buffer values
+        BITCAST_ERROR: True when error is stored as int8 and must be bitcast to ERROR_DTYPE on load
         BLOCK_SIZE: Number of elements per block (tl.constexpr)
     """
-    pid = tl.program_id(axis=0)
+    pid = tl.program_id(axis=0).to(tl.int64)
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_sample_ements
 
-    x = tl.load(input_ptr + (tl.randint(seed, offsets).to(tl.int64) % n_elements), mask=mask)
-    a = tl.abs(x)
+    rnd = (tl.randint(seed, offsets).to(tl.int64) % n_elements)
+
+    x = tl.load(input_ptr + rnd, mask=mask)
+    if keep_error:
+        if BITCAST_ERROR:
+            e = tl.load(err_ptr + rnd, mask=mask).to(ERROR_DTYPE, bitcast=True).to(INPUT_DTYPE)
+        else:
+            e = tl.load(err_ptr + rnd, mask=mask).to(INPUT_DTYPE)
+        if fp8_scale:
+            prev_scale = tl.load(prev_scale_ptr).to(INPUT_DTYPE)
+            e = e * prev_scale
+        a = tl.abs(x + e)
+    else:
+        a = tl.abs(x)
     tl.store(sample_out_ptr + offsets, a, mask=mask)
 
 
@@ -117,13 +160,23 @@ def sample_kernel(
 
 # Maps AXONN_PRUNE_ERROR_DTYPE env var value -> (torch.dtype, tl dtype constexpr)
 # fp8 types require Triton >= 2.2; on Ampere they are software-emulated.
+
 _ERROR_DTYPE_MAP: dict = {
-    "float32":      (torch.float32,        tl.float32),
-    "float16":      (torch.float16,        tl.float16),
-    "bfloat16":     (torch.bfloat16,       tl.bfloat16),
-    "float8_e4m3":  (torch.float8_e4m3fn,  tl.float8e4b15),  # E4M3, bias=15, Ampere-compatible
-    "float8_e4m3nv":(torch.float8_e4m3fn,  tl.float8e4nv),   # E4M3, NVIDIA native, Hopper only
-    "float8_e5m2":  (torch.float8_e5m2,    tl.float8e5),     # E5M2, Ampere-compatible
+    "float32":  (torch.float32,  tl.float32,    False),
+    "float16":  (torch.float16,  tl.float16,    False),
+    "bfloat16": (torch.bfloat16, tl.bfloat16,   False),
+    # FP8 types: stored as int8 to avoid Triton typing the pointer as fp8e4nv/fp8e5 on Ampere.
+    # The kernel receives *int8 pointers and bitcasts to the correct FP8 type internally.
+    "fp8e4":    (torch.int8,     tl.float8e4b15, True),   # E4M3, Ampere-compatible
+    "fp8e5":    (torch.int8,     tl.float8e5,    True),   # E5M2, Ampere-compatible
+}
+
+_TORCH_TO_TL: dict = {
+    torch.float32:       tl.float32,
+    torch.float16:       tl.float16,
+    torch.bfloat16:      tl.bfloat16,
+    torch.float8_e4m3fn: tl.float8e4b15,
+    torch.float8_e5m2:   tl.float8e5,
 }
 
 
@@ -138,8 +191,12 @@ class TritonGradientPruner:
             "float32"      - fp32 accumulation (higher precision)
             "float16"      - fp16
             "bfloat16"     - bf16
-            "float8_e4m3"  - E4M3 FP8 (software-emulated on Ampere)
-            "float8_e5m2"  - E5M2 FP8 (software-emulated on Ampere)
+            "fp8e4"        - E4M3 FP8, Ampere-compatible
+            "fp8e5"        - E5M2 FP8, Ampere-compatible
+        AXONN_PRUNE_FP8_SCALE: Set to "1" to enable threshold-based scaling of the FP8
+            error buffer (default "0"). Values are divided by the current threshold before
+            storing (mapping [-th, th] -> [-1, 1]) and multiplied by the previous threshold
+            on load. Only meaningful when AXONN_PRUNE_ERROR_DTYPE is fp8e4 or fp8e5.
     """
 
     def __init__(self, sparsity: float, sample_pct: float = 100.0):
@@ -149,16 +206,20 @@ class TritonGradientPruner:
         self.sample_pct = sample_pct
         self._error: dict = {}
         self._temp_sample: dict = {}
+        self._prev_scale: dict = {}
         self._keep_error: bool = False
         if os.getenv("AXONN_PRUNE_ERROR_ACCUMULATE", "1") == "1":
             self._keep_error = True
+
+        self._fp8_scale: bool = os.getenv("AXONN_PRUNE_FP8_SCALE", "0") == "1"
 
         error_dtype_str = os.getenv("AXONN_PRUNE_ERROR_DTYPE", "same").lower()
         if error_dtype_str == "same":
             self._error_torch_dtype = None  # resolved per-tensor at prune() time
             self._error_tl_dtype = None
+            self._bitcast_error = False
         elif error_dtype_str in _ERROR_DTYPE_MAP:
-            self._error_torch_dtype, self._error_tl_dtype = _ERROR_DTYPE_MAP[error_dtype_str]
+            self._error_torch_dtype, self._error_tl_dtype, self._bitcast_error = _ERROR_DTYPE_MAP[error_dtype_str]
         else:
             raise ValueError(
                 f"Unknown AXONN_PRUNE_ERROR_DTYPE={error_dtype_str!r}. "
@@ -166,20 +227,17 @@ class TritonGradientPruner:
             )
 
     def _tl_dtype_for(self, tensor: torch.Tensor) -> tl.constexpr:
-        """Return the tl dtype to use for the error buffer."""
-        if self._error_tl_dtype is not None:
-            return self._error_tl_dtype
-        _torch_to_tl = {
-            torch.float32:        tl.float32,
-            torch.float16:        tl.float16,
-            torch.bfloat16:       tl.bfloat16,
-            torch.float8_e4m3fn:  tl.float8e4b15,  # Ampere-compatible; use float8_e4m3nv for Hopper
-            torch.float8_e5m2:    tl.float8e5,
-        }
-        dtype = _torch_to_tl.get(tensor.dtype)
+        """Return the tl dtype matching tensor.dtype (no error-override)."""
+        dtype = _TORCH_TO_TL.get(tensor.dtype)
         if dtype is None:
             raise ValueError(f"No tl dtype mapping for tensor dtype {tensor.dtype}")
         return dtype
+
+    def _error_tl_dtype_for(self, tensor: torch.Tensor) -> tl.constexpr:
+        """Return the tl dtype for the error buffer (applies AXONN_PRUNE_ERROR_DTYPE override)."""
+        if self._error_tl_dtype is not None:
+            return self._error_tl_dtype
+        return self._tl_dtype_for(tensor)
 
     def _error_torch_dtype_for(self, tensor: torch.Tensor) -> torch.dtype:
         if self._error_torch_dtype is not None:
@@ -187,17 +245,21 @@ class TritonGradientPruner:
         return tensor.dtype
 
     @torch.no_grad()
-    def prune(self, tensor: torch.Tensor, key=0) -> torch.Tensor:
+    def prune(self, tensor: torch.Tensor, key=0, timer=None) -> torch.Tensor:
         """
         Prune tensor in-place with error feedback using Triton kernel.
 
         Args:
             tensor: gradient tensor to prune (modified in-place)
-            key: identifier for this tensor's error buffer
+            key:    identifier for this tensor's error buffer
+            timer:  optional _CudaOpTimer to bracket this call
 
         Returns:
             Pruned tensor
         """
+        if timer is not None:
+            timer.start()
+
         n = tensor.numel()
         n_sample_elems = max(1, int(n * self.sample_pct / 100))
         if key in self._temp_sample:
@@ -216,14 +278,29 @@ class TritonGradientPruner:
         else:
             error_buffer = tensor
 
+        # prev_scale: threshold from the previous iteration, used to unscale the stored FP8 error.
+        # Stored as a 1-element float32 tensor so it can be passed as a device pointer to kernels.
+        # Initialized to 1.0 (error buffer is all zeros on first iteration, so scale doesn't matter).
+        effective_fp8_scale = self._fp8_scale and self._keep_error
+        if key not in self._prev_scale:
+            self._prev_scale[key] = torch.ones(1, device=tensor.device, dtype=torch.float32)
+        prev_scale_buf = self._prev_scale[key]
+
         grid = lambda meta: (triton.cdiv(n_sample_elems, meta["BLOCK_SIZE"]),)
         seed = torch.randint(0, 2**31, (1,)).item()
         sample_kernel[grid](
             tensor,
+            error_buffer,
             sample_out,
             n,
             n_sample_elems,
             seed,
+            self._keep_error,
+            effective_fp8_scale,
+            prev_scale_buf,
+            self._tl_dtype_for(tensor),
+            self._error_tl_dtype_for(tensor),
+            self._bitcast_error and self._keep_error,
         )
 
         k = max(1, int(n_sample_elems * self.sparsity))
@@ -239,12 +316,24 @@ class TritonGradientPruner:
             threshold,
             self.sparsity,
             self._keep_error,
+            effective_fp8_scale,
+            prev_scale_buf,
             self._tl_dtype_for(tensor),
-            self._tl_dtype_for(error_buffer),
+            self._error_tl_dtype_for(tensor),
+            self._bitcast_error and self._keep_error,
         )
+
+        # Update prev_scale for the next iteration. This copy_ is queued on the same CUDA stream
+        # after both kernels, so it reads the new threshold only after the kernels have finished.
+        if effective_fp8_scale:
+            prev_scale_buf.copy_(threshold.float().reshape(1))
+
+        if timer is not None:
+            timer.stop()
 
         return tensor
 
     def clear_error(self):
-        """Clear all error buffers."""
+        """Clear all error buffers and reset FP8 scale history."""
         self._error.clear()
+        self._prev_scale.clear()

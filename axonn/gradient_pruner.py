@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 
 class GradientPruner:
@@ -23,7 +24,7 @@ class GradientPruner:
         self._error: dict = {}
 
     @torch.no_grad()
-    def prune(self, tensor: torch.Tensor, key=0) -> torch.Tensor:
+    def prune(self, tensor: torch.Tensor, key=0, timer=None) -> torch.Tensor:
         """
         Prune tensor in-place with error feedback. Returns tensor.
 
@@ -32,7 +33,11 @@ class GradientPruner:
             key:    identifier for this tensor's error buffer.
                     Use param.data_ptr() for per-layer RS pruning;
                     use a fixed constant for a flat AR buffer.
+            timer:  optional _CudaOpTimer to bracket this call.
         """
+        if timer is not None:
+            timer.start()
+
         if key in self._error:
             tensor.add_(self._error[key])
 
@@ -56,6 +61,10 @@ class GradientPruner:
             self._error[key] = tensor.clone().mul_(~mask)
 
         tensor.mul_(mask)
+
+        if timer is not None:
+            timer.stop()
+
         return tensor
 
     def clear_error(self):

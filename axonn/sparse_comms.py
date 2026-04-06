@@ -25,6 +25,8 @@ import torch
 import torch.distributed as dist
 from torch.utils.cpp_extension import load as _cpp_load
 
+from typing import Optional
+
 _HERE = Path(__file__).parent.resolve()
 
 _NCCLX_BUILD_DIR = Path(
@@ -168,7 +170,6 @@ def _launch_sparse(ext_fn, tensors, comm_ptr, group, async_op):
         for t in tensors:
             t.record_stream(nccl_stream)
 
-        # Launch collective on ncclStream.
         ext_fn(*tensors, comm_ptr, nccl_stream_ptr)
 
         # Record ncclEndEvent on ncclStream.
@@ -186,7 +187,20 @@ def _launch_sparse(ext_fn, tensors, comm_ptr, group, async_op):
 # Public API
 # ---------------------------------------------------------------------------
 
-def reduce_scatter_sparse(input, output, group=None, async_op=False):
+def _timer_stream(group, async_op):
+    """
+    Return the CUDA stream on which NCCL executes this collective.
+
+    With async_op=True, both torch.distributed and the sparse path run the
+    kernel on torch's internal per-(group,device) NCCL stream.
+    With async_op=False the kernel runs on the current stream (None).
+    """
+    if async_op:
+        return torch.cuda.ExternalStream(_get_nccl_stream_ptr(group))
+    return None
+
+
+def reduce_scatter_sparse(input, output, group=None, async_op=False, timer=None):
     """
     Reduce-scatter (sum).
 
@@ -196,17 +210,29 @@ def reduce_scatter_sparse(input, output, group=None, async_op=False):
 
     input:  [nranks * recvcount] — full tensor
     output: [recvcount]          — this rank's slice
+    timer:  optional _CudaOpTimer; events are recorded on the NCCL stream
+            (async_op=True) or current stream (async_op=False) so that
+            elapsed_time() captures actual kernel execution time regardless
+            of whether the sparse or dense path is taken.
     """
+    if timer is not None:
+        stream = _timer_stream(group, async_op)
+        timer.start(stream)
+
     if not _USE_SPARSE_RS:
-        return dist.reduce_scatter_tensor(output, input, group=group, async_op=async_op)
+        result = dist.reduce_scatter_tensor(output, input, group=group, async_op=async_op)
+    else:
+        if _LOG_SPARSITY:
+            _log_sparsity(f"reduce_scatter_sparse/input, dense data size: {input.shape}", input)
+        comm_ptr = _get_comm_ptr(group)
+        result = _launch_sparse(_ext.reduce_scatter_sparse, (input, output), comm_ptr, group, async_op)
 
-    if _LOG_SPARSITY:
-        _log_sparsity(f"reduce_scatter_sparse/input, dense data size: {input.shape}", input)
-    comm_ptr = _get_comm_ptr(group)
-    return _launch_sparse(_ext.reduce_scatter_sparse, (input, output), comm_ptr, group, async_op)
+    if timer is not None:
+        timer.stop(stream)
+    return result
 
 
-def all_gather_sparse(input, output, group=None, async_op=False):
+def all_gather_sparse(input, output, group=None, async_op=False, timer=None):
     """
     All-gather.
 
@@ -216,33 +242,52 @@ def all_gather_sparse(input, output, group=None, async_op=False):
 
     input:  [sendcount]          — this rank's chunk
     output: [nranks * sendcount] — gathered result
+    timer:  optional _CudaOpTimer; see reduce_scatter_sparse for stream notes.
     """
+    if timer is not None:
+        stream = _timer_stream(group, async_op)
+        timer.start(stream)
+
     if not _USE_SPARSE_AG:
-        return dist.all_gather_into_tensor(output, input, group=group, async_op=async_op)
+        result = dist.all_gather_into_tensor(output, input, group=group, async_op=async_op)
+    else:
+        if _LOG_SPARSITY:
+            _log_sparsity("all_gather_sparse/input", input)
+        comm_ptr = _get_comm_ptr(group)
+        result = _launch_sparse(_ext.all_gather_sparse, (input, output), comm_ptr, group, async_op)
 
-    if _LOG_SPARSITY:
-        _log_sparsity("all_gather_sparse/input", input)
-    comm_ptr = _get_comm_ptr(group)
-    return _launch_sparse(_ext.all_gather_sparse, (input, output), comm_ptr, group, async_op)
+    if timer is not None:
+        timer.stop(stream)
+    return result
 
 
-def all_reduce_sparse(input, output=None, group=None, async_op=False):
+def all_reduce_sparse(input, output=None, group=None, async_op=False, timer=None):
     """
     All-reduce (sum). In-place if output is None or output is input.
 
     Fast path (USE_SPARSE_AR=0): forwards directly to torch.distributed.
     Sparse path (USE_SPARSE_AR=1): uses sparse NCCL kernel on torch's internal
     NCCL stream, matching ProcessGroupNCCL's async launch pattern.
+
+    timer:  optional _CudaOpTimer; see reduce_scatter_sparse for stream notes.
     """
     if output is None:
         output = input
 
+    if timer is not None:
+        stream = _timer_stream(group, async_op)
+        timer.start(stream)
+
     if not _USE_SPARSE_AR:
         if output.data_ptr() != input.data_ptr():
             output.copy_(input)
-        return dist.all_reduce(output, group=group, async_op=async_op)
+        result = dist.all_reduce(output, group=group, async_op=async_op)
+    else:
+        if _LOG_SPARSITY:
+            _log_sparsity("all_reduce_sparse/input", input)
+        comm_ptr = _get_comm_ptr(group)
+        result = _launch_sparse(_ext.all_reduce_sparse, (input, output), comm_ptr, group, async_op)
 
-    if _LOG_SPARSITY:
-        _log_sparsity("all_reduce_sparse/input", input)
-    comm_ptr = _get_comm_ptr(group)
-    return _launch_sparse(_ext.all_reduce_sparse, (input, output), comm_ptr, group, async_op)
+    if timer is not None:
+        timer.stop(stream)
+    return result
