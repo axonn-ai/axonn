@@ -99,6 +99,43 @@ def prune_kernel(
         triton.Config({"BLOCK_SIZE": 2048}),
         triton.Config({"BLOCK_SIZE": 4096}),
     ],
+    key=["n_elements"],
+    reset_to_zero=["nnz_ptr"],
+)
+@triton.jit
+def measure_sparsity_kernel(
+    input_ptr,
+    nnz_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    """
+    Boilerplate kernel to count the number of non-zero elements in input_ptr.
+
+    Args:
+        input_ptr: Pointer to (already pruned) tensor
+        nnz_ptr:   Pointer to a single int64 counter (accumulated via atomic_add)
+        n_elements: Total number of elements
+        BLOCK_SIZE: Number of elements per block (tl.constexpr)
+    """
+    pid = tl.program_id(axis=0).to(tl.int64)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+
+    data = tl.load(input_ptr + offsets, mask=mask, other=0)
+    nz = (data != 0).to(tl.int64)
+    s = tl.sum(nz)
+    tl.atomic_add(nnz_ptr, s)
+
+
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": 512}),
+        triton.Config({"BLOCK_SIZE": 1024}),
+        triton.Config({"BLOCK_SIZE": 2048}),
+        triton.Config({"BLOCK_SIZE": 4096}),
+    ],
     key=["n_elements", "n_sample_ements"],
 )
 @triton.jit
@@ -213,6 +250,11 @@ class TritonGradientPruner:
 
         self._fp8_scale: bool = os.getenv("AXONN_PRUNE_FP8_SCALE", "0") == "1"
 
+        self._measure_sparsity: bool = os.getenv("AXONN_PRUNE_MEASURE_SPARSITY", "0") == "1"
+        # Per-key device counter (int64 nnz) and cached numel, holding the previous iteration's result.
+        self._nnz: dict = {}
+        self._numel: dict = {}
+
         error_dtype_str = os.getenv("AXONN_PRUNE_ERROR_DTYPE", "same").lower()
         if error_dtype_str == "same":
             self._error_torch_dtype = None  # resolved per-tensor at prune() time
@@ -259,6 +301,16 @@ class TritonGradientPruner:
         """
         if timer is not None:
             timer.start()
+
+        # Print the previous iteration's measured sparsity for this key.
+        # This is a host sync on the counter — the counter was written on the CUDA stream
+        # during the previous prune() call, so by now it should be ready.
+        if self._measure_sparsity and key in self._nnz:
+            prev_nnz = int(self._nnz[key].item())
+            prev_numel = self._numel[key]
+            prev_sparsity = 1.0 - (prev_nnz / prev_numel) if prev_numel > 0 else 0.0
+            print(f"[TritonGradientPruner] key={key} prev sparsity={prev_sparsity:.6f} "
+                  f"(nnz={prev_nnz}/{prev_numel})", flush=True)
 
         n = tensor.numel()
         n_sample_elems = max(1, int(n * self.sample_pct / 100))
@@ -323,6 +375,22 @@ class TritonGradientPruner:
             self._bitcast_error and self._keep_error,
         )
 
+        # Measure output sparsity on-device. Counter is zeroed and then filled by
+        # measure_sparsity_kernel, queued on the same stream after prune_kernel.
+        # The result will be read (host sync) on the next call to prune() for this key.
+        if self._measure_sparsity:
+            if key not in self._nnz:
+                self._nnz[key] = torch.zeros(1, device=tensor.device, dtype=torch.int64)
+            nnz_buf = self._nnz[key]
+            nnz_buf.zero_()
+            self._numel[key] = n
+            grid_meas = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+            measure_sparsity_kernel[grid_meas](
+                tensor,
+                nnz_buf,
+                n,
+            )
+
         # Update prev_scale for the next iteration. This copy_ is queued on the same CUDA stream
         # after both kernels, so it reads the new threshold only after the kernels have finished.
         if effective_fp8_scale:
@@ -337,3 +405,5 @@ class TritonGradientPruner:
         """Clear all error buffers and reset FP8 scale history."""
         self._error.clear()
         self._prev_scale.clear()
+        self._nnz.clear()
+        self._numel.clear()
