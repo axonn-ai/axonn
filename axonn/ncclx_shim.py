@@ -67,7 +67,7 @@ _dbg("C++ extension loaded")
 
 NCCLX_LIB_PATH: str = os.environ.get(
     "NCCLX_LIB_PATH",
-    "/pscratch/sd/e/egencer/sparsecomms/torchcomms-sparse/build/ncclx/lib/libnccl.so.2",
+    os.path.join(os.environ.get("TORCHCOMMS_SPARSE_HOME", ""), "build/ncclx/lib/libnccl.so.2"),
 )
 
 # Load NCCLx at module import time — before CUDA or PyTorch's NCCL is active.
