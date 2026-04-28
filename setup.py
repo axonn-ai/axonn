@@ -18,5 +18,6 @@ setup(
     classifiers=["Development Status :: 2 - Pre-Alpha"],
     keywords="deep learning, distributed computing, parallel computing",
     packages=find_packages(),
-    install_requires=["torch"],
+    # torch provided by module load pytorch/2.8.0 on Perlmutter; do not pip install
+    install_requires=[],
 )
